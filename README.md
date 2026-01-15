@@ -10,17 +10,15 @@ Run this in Terminal (`Cmd + Space`, type "Terminal", hit Enter):
 curl -fsSL https://raw.githubusercontent.com/s-b-e-n-s-o-n/voice-synth/main/install.sh | bash
 ```
 
-That's it. Everything installs automatically.
+That's it. Everything installs automatically to `~/voice-synth-main`.
 
----
-
-**Already have it downloaded?** Just run:
+**Run it again later:**
 
 ```bash
-./voice-synth
+cd ~/voice-synth-main && ./voice-synth
 ```
 
-The interactive menu will guide you through everything.
+**Update to latest version:** Just run the curl command again.
 
 ## Setup
 

@@ -13,6 +13,7 @@ PYTHON="$VENV_DIR/bin/python3"
 GUM_DIR="$CACHE_DIR/bin"
 GUM="$GUM_DIR/gum"
 GUM_VERSION="0.14.5"
+JOBS_FILE="$CACHE_DIR/jobs.json"
 
 # Get terminal width for centering
 WIDTH=${COLUMNS:-80}
@@ -39,6 +40,93 @@ get_padding() {
     local margin=$(( (WIDTH - item_width) / 2 ))
     [ "$margin" -lt 0 ] && margin=0
     printf '%*s' "$margin" ''
+}
+
+# Job tracking functions
+init_jobs_file() {
+    if [ ! -f "$JOBS_FILE" ]; then
+        echo '[]' > "$JOBS_FILE"
+    fi
+}
+
+# Add or update a job
+save_job() {
+    local mbox_path="$1"
+    local work_dir="$2"
+    local status="$3"  # in_progress, completed
+    local timestamp
+    timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+    init_jobs_file
+
+    # Use Python for JSON manipulation (jq not guaranteed)
+    "$PYTHON" -c "
+import json
+import sys
+
+mbox = '$mbox_path'
+work_dir = '$work_dir'
+status = '$status'
+timestamp = '$timestamp'
+
+with open('$JOBS_FILE', 'r') as f:
+    jobs = json.load(f)
+
+# Update existing or add new
+found = False
+for job in jobs:
+    if job.get('mbox') == mbox and job.get('work_dir') == work_dir:
+        job['status'] = status
+        job['updated'] = timestamp
+        found = True
+        break
+
+if not found:
+    jobs.append({
+        'mbox': mbox,
+        'work_dir': work_dir,
+        'status': status,
+        'started': timestamp,
+        'updated': timestamp
+    })
+
+# Keep only last 10 jobs
+jobs = sorted(jobs, key=lambda x: x.get('updated', ''), reverse=True)[:10]
+
+with open('$JOBS_FILE', 'w') as f:
+    json.dump(jobs, f, indent=2)
+"
+}
+
+# Get incomplete jobs as newline-separated "mbox|work_dir" pairs
+get_incomplete_jobs() {
+    init_jobs_file
+    "$PYTHON" -c "
+import json
+import os
+
+with open('$JOBS_FILE', 'r') as f:
+    jobs = json.load(f)
+
+for job in jobs:
+    if job.get('status') == 'in_progress':
+        work_dir = job.get('work_dir', '')
+        # Check if work_dir still exists and has intermediate files
+        if os.path.isdir(work_dir):
+            has_intermediate = (
+                os.path.exists(os.path.join(work_dir, 'emails_raw.json')) or
+                os.path.exists(os.path.join(work_dir, 'emails.jsonl')) or
+                os.path.exists(os.path.join(work_dir, 'cleaned_emails.json'))
+            )
+            # Skip if already completed
+            if os.path.exists(os.path.join(work_dir, 'style_shortlist.csv')):
+                continue
+            if has_intermediate:
+                mbox = job.get('mbox', 'unknown')
+                # Show just filename, not full path
+                mbox_name = os.path.basename(mbox)
+                print(f'{mbox_name}|{work_dir}')
+"
 }
 
 # Resolve which gum to use (system or cached)
@@ -448,26 +536,17 @@ run_curate() {
 }
 
 # Run full pipeline
+# Simple get started - just file and sender, use defaults
 run_full_pipeline() {
     show_header
-    center "$("$GUM" style --foreground 99 --bold 'Full Pipeline')"
-    echo ""
-    center "$("$GUM" style --foreground 245 'Select your input file type:')"
+    center "$("$GUM" style --foreground 99 --bold 'Get Started')"
     echo ""
 
     local pad
     pad=$(get_padding $ITEM_WIDTH)
 
-    local file_type
-    file_type=$("$GUM" choose "${pad}MBOX file (from Google Takeout)" "${pad}JSON file (already converted)")
-    file_type="${file_type#"$pad"}"
-
     local input_file
-    if [[ "$file_type" == "MBOX"* ]]; then
-        input_file=$(pick_file "Select MBOX file:" "*.mbox")
-    else
-        input_file=$(pick_file "Select JSON file:" "*.json")
-    fi
+    input_file=$(pick_file "Drop your .mbox file from Google Takeout:" "*.mbox")
 
     if [ -z "$input_file" ] || [ ! -f "$input_file" ]; then
         echo ""
@@ -486,28 +565,159 @@ run_full_pipeline() {
     fi
 
     echo ""
-    center "$("$GUM" style --foreground 245 'Max emails per topic:')"
+    center "$("$GUM" style --foreground 214 'Processing your emails...')"
+    center "$("$GUM" style --foreground 245 --italic 'This may take a few minutes for large mailboxes.')"
+    echo ""
+
+    # Track job as in_progress
+    local work_dir
+    work_dir=$(pwd)
+    local abs_input
+    abs_input=$(cd "$(dirname "$input_file")" && pwd)/$(basename "$input_file")
+    save_job "$abs_input" "$work_dir" "in_progress"
+
+    "$PYTHON" pipeline.py run "$input_file" $sender_arg
+
+    # Mark job as completed
+    save_job "$abs_input" "$work_dir" "completed"
+
+    # Copy CSV to Desktop
+    local desktop_path="$HOME/Desktop/style_shortlist.csv"
+    cp style_shortlist.csv "$desktop_path" 2>/dev/null || true
+
+    echo ""
+    center "$("$GUM" style --foreground 82 --bold 'Done!')"
+    echo ""
+    center "$("$GUM" style --foreground 82 --bold 'Output saved to Desktop:')"
+    center "$("$GUM" style --foreground 82 '~/Desktop/style_shortlist.csv')"
+    echo ""
+    center "$("$GUM" style --foreground 245 --italic 'Open it in a spreadsheet to review your emails.')"
+    echo ""
+    printf '%s' "$pad"
+    "$GUM" input --placeholder "Press Enter to continue..."
+}
+
+# Advanced get started - walks through all settings with explanations
+run_full_pipeline_advanced() {
+    show_header
+    center "$("$GUM" style --foreground 99 --bold 'Get Started (Advanced)')"
+    echo ""
+    center "$("$GUM" style --foreground 245 "Let's configure your email processing.")"
+    echo ""
+
+    local pad
+    pad=$(get_padding $ITEM_WIDTH)
+
+    # Step 1: File selection
+    center "$("$GUM" style --foreground 99 --bold 'Step 1: Select your email file')"
+    echo ""
+    local input_file
+    input_file=$(pick_file "Drop your .mbox file from Google Takeout:" "*.mbox")
+
+    if [ -z "$input_file" ] || [ ! -f "$input_file" ]; then
+        echo ""
+        center "$("$GUM" style --foreground 196 "File not found: $input_file")"
+        printf '%s' "$pad"
+        "$GUM" input --placeholder "Press Enter to continue..."
+        return 1
+    fi
+
+    # Step 2: Sender filter
+    show_header
+    center "$("$GUM" style --foreground 99 --bold 'Step 2: Filter by sender')"
+    echo ""
+    center "$("$GUM" style --foreground 245 'To train a model on YOUR writing style, we need')"
+    center "$("$GUM" style --foreground 245 'only emails that YOU wrote (not received).')"
+    echo ""
+    local sender
+    sender=$(get_sender)
+
+    local sender_arg=""
+    if [ -n "$sender" ]; then
+        sender_arg="--sender $sender"
+    fi
+
+    # Step 3: Date range
+    show_header
+    center "$("$GUM" style --foreground 99 --bold 'Step 3: Date range')"
+    echo ""
+    center "$("$GUM" style --foreground 245 'How many years back should we look?')"
+    center "$("$GUM" style --foreground 245 --italic 'Older emails may not reflect your current writing style.')"
+    echo ""
+    printf '%s' "$pad"
+    local years
+    years=$("$GUM" input --value "5" --placeholder "5" --width 20)
+    years="${years:-5}"
+
+    # Step 4: Emails per topic
+    show_header
+    center "$("$GUM" style --foreground 99 --bold 'Step 4: Emails per category')"
+    echo ""
+    center "$("$GUM" style --foreground 245 'Max emails to keep per topic (client, strategy, etc.)')"
+    center "$("$GUM" style --foreground 245 --italic 'This ensures balanced training data across different types.')"
+    echo ""
     printf '%s' "$pad"
     local per_topic
     per_topic=$("$GUM" input --value "200" --placeholder "200" --width 20)
     per_topic="${per_topic:-200}"
 
+    # Step 5: Minimum length
+    show_header
+    center "$("$GUM" style --foreground 99 --bold 'Step 5: Minimum email length')"
     echo ""
-    center "$("$GUM" style --foreground 214 'Running full pipeline...')"
+    center "$("$GUM" style --foreground 245 'Minimum characters for an email to be included.')"
+    center "$("$GUM" style --foreground 245 --italic 'Short emails like "Thanks!" don'\''t capture your style well.')"
+    echo ""
+    printf '%s' "$pad"
+    local min_chars
+    min_chars=$("$GUM" input --value "200" --placeholder "200" --width 20)
+    min_chars="${min_chars:-200}"
+
+    # Step 6: Dedupe threshold
+    show_header
+    center "$("$GUM" style --foreground 99 --bold 'Step 6: Duplicate detection')"
+    echo ""
+    center "$("$GUM" style --foreground 245 'How similar should two emails be to count as duplicates?')"
+    center "$("$GUM" style --foreground 245 --italic '0.8 = 80% similar. Higher = stricter, fewer removed.')"
+    echo ""
+    printf '%s' "$pad"
+    local dedupe_threshold
+    dedupe_threshold=$("$GUM" input --value "0.8" --placeholder "0.8" --width 20)
+    dedupe_threshold="${dedupe_threshold:-0.8}"
+
+    # Run pipeline
+    show_header
+    center "$("$GUM" style --foreground 214 'Processing your emails...')"
+    center "$("$GUM" style --foreground 245 --italic 'This may take a few minutes for large mailboxes.')"
     echo ""
 
-    "$PYTHON" pipeline.py run "$input_file" $sender_arg --per-topic "$per_topic"
+    # Track job as in_progress
+    local work_dir
+    work_dir=$(pwd)
+    local abs_input
+    abs_input=$(cd "$(dirname "$input_file")" && pwd)/$(basename "$input_file")
+    save_job "$abs_input" "$work_dir" "in_progress"
+
+    # Run import if mbox
+    "$PYTHON" pipeline.py import "$input_file" --out emails_raw.json
+    "$PYTHON" pipeline.py convert emails_raw.json --out emails.jsonl
+    "$PYTHON" pipeline.py clean emails.jsonl --out cleaned_emails.json $sender_arg --years "$years"
+    "$PYTHON" pipeline.py curate cleaned_emails.json --out style_shortlist.csv --per-topic "$per_topic" --min-chars "$min_chars" --dedupe-threshold "$dedupe_threshold"
+
+    # Mark job as completed
+    save_job "$abs_input" "$work_dir" "completed"
+
+    # Copy CSV to Desktop
+    local desktop_path="$HOME/Desktop/style_shortlist.csv"
+    cp style_shortlist.csv "$desktop_path" 2>/dev/null || true
 
     echo ""
-    center "$("$GUM" style --foreground 82 --bold 'Pipeline complete!')"
+    center "$("$GUM" style --foreground 82 --bold 'Done!')"
     echo ""
-    center "$("$GUM" style --foreground 245 'Output files:')"
-    if [[ "$file_type" == "MBOX"* ]]; then
-        center "$("$GUM" style --foreground 245 '• emails_raw.json (imported from MBOX)')"
-    fi
-    center "$("$GUM" style --foreground 245 '• emails.jsonl (converted)')"
-    center "$("$GUM" style --foreground 245 '• cleaned_emails.json (anonymized)')"
-    center "$("$GUM" style --foreground 245 '• style_shortlist.csv (curated)')"
+    center "$("$GUM" style --foreground 82 --bold 'Output saved to Desktop:')"
+    center "$("$GUM" style --foreground 82 '~/Desktop/style_shortlist.csv')"
+    echo ""
+    center "$("$GUM" style --foreground 245 --italic 'Open it in a spreadsheet to review your emails.')"
     echo ""
     printf '%s' "$pad"
     "$GUM" input --placeholder "Press Enter to continue..."
@@ -591,6 +801,134 @@ run_cleanup() {
     fi
 }
 
+# Show results when already processed
+show_results() {
+    show_header
+    center "$("$GUM" style --foreground 82 --bold 'Processing Complete!')"
+    echo ""
+
+    local pad
+    pad=$(get_padding $ITEM_WIDTH)
+
+    # Copy to Desktop if not already there
+    local desktop_path="$HOME/Desktop/style_shortlist.csv"
+    if [ -f "style_shortlist.csv" ]; then
+        cp style_shortlist.csv "$desktop_path" 2>/dev/null || true
+    fi
+
+    center "$("$GUM" style --foreground 82 --bold 'Output saved to Desktop:')"
+    center "$("$GUM" style --foreground 82 '~/Desktop/style_shortlist.csv')"
+    echo ""
+    center "$("$GUM" style --foreground 245 --italic 'Open it in a spreadsheet to review your emails.')"
+    echo ""
+    printf '%s' "$pad"
+    "$GUM" input --placeholder "Press Enter to continue..."
+}
+
+# Resume from intermediate files
+run_resume() {
+    show_header
+    local pad
+    pad=$(get_padding $ITEM_WIDTH)
+
+    # Determine where to resume from
+    local start_stage=""
+    local input_file=""
+
+    if [ -f "cleaned_emails.json" ]; then
+        start_stage="curate"
+        input_file="cleaned_emails.json"
+        center "$("$GUM" style --foreground 99 --bold 'Resuming from Step 3: Curate')"
+    elif [ -f "emails.jsonl" ]; then
+        start_stage="clean"
+        input_file="emails.jsonl"
+        center "$("$GUM" style --foreground 99 --bold 'Resuming from Step 2: Clean')"
+    elif [ -f "emails_raw.json" ]; then
+        start_stage="convert"
+        input_file="emails_raw.json"
+        center "$("$GUM" style --foreground 99 --bold 'Resuming from Step 1: Convert')"
+    fi
+
+    echo ""
+    center "$("$GUM" style --foreground 245 "Found: $input_file")"
+    echo ""
+
+    # Get sender if we're at clean stage
+    local sender=""
+    local sender_arg=""
+    if [ "$start_stage" = "clean" ]; then
+        sender=$(get_sender)
+        if [ -n "$sender" ]; then
+            sender_arg="--sender $sender"
+        fi
+    fi
+
+    echo ""
+    center "$("$GUM" style --foreground 214 'Running pipeline...')"
+    echo ""
+
+    case "$start_stage" in
+        "convert")
+            "$PYTHON" pipeline.py convert "$input_file" --out emails.jsonl
+            sender=$(get_sender)
+            if [ -n "$sender" ]; then
+                sender_arg="--sender $sender"
+            fi
+            "$PYTHON" pipeline.py clean emails.jsonl --out cleaned_emails.json $sender_arg
+            "$PYTHON" pipeline.py curate cleaned_emails.json --out style_shortlist.csv
+            ;;
+        "clean")
+            "$PYTHON" pipeline.py clean "$input_file" --out cleaned_emails.json $sender_arg
+            "$PYTHON" pipeline.py curate cleaned_emails.json --out style_shortlist.csv
+            ;;
+        "curate")
+            "$PYTHON" pipeline.py curate "$input_file" --out style_shortlist.csv
+            ;;
+    esac
+
+    # Mark any job for this directory as completed
+    local work_dir
+    work_dir=$(pwd)
+    "$PYTHON" -c "
+import json
+import os
+
+jobs_file = '$JOBS_FILE'
+work_dir = '$work_dir'
+
+if os.path.exists(jobs_file):
+    with open(jobs_file, 'r') as f:
+        jobs = json.load(f)
+    for job in jobs:
+        if job.get('work_dir') == work_dir:
+            job['status'] = 'completed'
+    with open(jobs_file, 'w') as f:
+        json.dump(jobs, f, indent=2)
+" 2>/dev/null || true
+
+    # Copy CSV to Desktop
+    local desktop_path="$HOME/Desktop/style_shortlist.csv"
+    cp style_shortlist.csv "$desktop_path" 2>/dev/null || true
+
+    echo ""
+    center "$("$GUM" style --foreground 82 --bold 'Pipeline complete!')"
+    echo ""
+    center "$("$GUM" style --foreground 82 --bold 'Output saved to Desktop:')"
+    center "$("$GUM" style --foreground 82 '~/Desktop/style_shortlist.csv')"
+    echo ""
+    center "$("$GUM" style --foreground 245 --italic 'Open it in a spreadsheet to review your emails.')"
+    echo ""
+    printf '%s' "$pad"
+    "$GUM" input --placeholder "Press Enter to continue..."
+}
+
+# Resume a job from a specific work directory
+resume_job_in_dir() {
+    local work_dir="$1"
+    cd "$work_dir" || return 1
+    run_resume
+}
+
 # Main menu
 main_menu() {
     while true; do
@@ -601,34 +939,46 @@ main_menu() {
         local padding
         padding=$(printf '%*s' "$margin" '')
 
+        # Build menu options
+        local -a menu_options=()
+
+        # Check for incomplete jobs from tracker
+        local incomplete_jobs
+        incomplete_jobs=$(get_incomplete_jobs 2>/dev/null || echo "")
+
+        if [ -n "$incomplete_jobs" ]; then
+            menu_options+=("${padding}Continue previous")
+        fi
+
+        menu_options+=("${padding}Get started")
+        menu_options+=("${padding}Get started (advanced)")
+        menu_options+=("${padding}Help")
+        menu_options+=("${padding}Uninstall")
+        menu_options+=("${padding}Quit")
+
         local choice
-        choice=$("$GUM" choose \
-            "${padding}Run full pipeline" \
-            "${padding}Step 0: Import MBOX (Google Takeout)" \
-            "${padding}Step 1: Convert to JSONL" \
-            "${padding}Step 2: Clean & Anonymize" \
-            "${padding}Step 3: Curate Shortlist" \
-            "${padding}Help" \
-            "${padding}Uninstall" \
-            "${padding}Quit")
+        choice=$("$GUM" choose "${menu_options[@]}")
         # Strip padding from result
         choice="${choice#"$padding"}"
 
         case "$choice" in
-            "Run full pipeline")
+            "Continue previous")
+                # Get the most recent incomplete job
+                local target_dir
+                target_dir=$(echo "$incomplete_jobs" | head -1 | cut -d'|' -f2)
+
+                if [ -n "$target_dir" ] && [ -d "$target_dir" ]; then
+                    resume_job_in_dir "$target_dir"
+                else
+                    center "$("$GUM" style --foreground 196 'Previous session not found')"
+                    sleep 1
+                fi
+                ;;
+            "Get started")
                 run_full_pipeline
                 ;;
-            "Step 0: Import MBOX (Google Takeout)")
-                run_import
-                ;;
-            "Step 1: Convert to JSONL")
-                run_convert
-                ;;
-            "Step 2: Clean & Anonymize")
-                run_clean
-                ;;
-            "Step 3: Curate Shortlist")
-                run_curate
+            "Get started (advanced)")
+                run_full_pipeline_advanced
                 ;;
             "Help")
                 show_help

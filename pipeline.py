@@ -15,6 +15,7 @@ Can be used as a library or run directly with subcommands.
 
 import argparse
 import csv
+import hashlib
 import json
 import mailbox
 import os
@@ -640,11 +641,97 @@ def is_style_candidate(email: Dict[str, Any], min_chars: int = 200) -> bool:
     return True
 
 
+def deduplicate_emails(
+    candidates: List[Dict[str, Any]],
+    threshold: float = 0.8,
+    quiet: bool = False
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """
+    Remove exact and near-duplicate emails, keeping the richest version.
+
+    Uses two-level deduplication:
+    1. Exact hash match (SHA-256 of normalized body)
+    2. MinHash LSH for near-duplicates (Jaccard similarity)
+
+    Args:
+        candidates: List of email dicts with Body field
+        threshold: Jaccard similarity threshold for near-duplicates (0.0-1.0)
+        quiet: If True, suppress progress output
+
+    Returns:
+        Tuple of (deduplicated_list, stats_dict)
+    """
+    try:
+        from datasketch import MinHash, MinHashLSH
+        has_datasketch = True
+    except ImportError:
+        has_datasketch = False
+        if not quiet:
+            print("Warning: datasketch not installed, using exact-match only")
+
+    # Sort by richness descending so we keep the best version first
+    sorted_candidates = sorted(
+        candidates,
+        key=lambda e: richness_score(e.get("Body", "")),
+        reverse=True
+    )
+
+    seen_hashes: Set[str] = set()
+    kept: List[Dict[str, Any]] = []
+    stats = {"exact_dupes": 0, "near_dupes": 0}
+
+    # Initialize LSH if available
+    lsh = None
+    if has_datasketch:
+        lsh = MinHashLSH(threshold=threshold, num_perm=128)
+
+    for email in sorted_candidates:
+        body = (email.get("Body") or "").strip().lower()
+        body_normalized = re.sub(r'\s+', ' ', body)  # Normalize whitespace
+
+        # Level 1: Exact hash match
+        body_hash = hashlib.sha256(body_normalized.encode()).hexdigest()
+        if body_hash in seen_hashes:
+            stats["exact_dupes"] += 1
+            continue
+        seen_hashes.add(body_hash)
+
+        # Level 2: MinHash LSH for near-duplicates
+        if lsh is not None and len(body_normalized) > 50:
+            mh = MinHash(num_perm=128)
+            words = body_normalized.split()
+            # Use 3-word shingles
+            for i in range(max(1, len(words) - 2)):
+                shingle = ' '.join(words[i:i+3])
+                mh.update(shingle.encode('utf8'))
+
+            # Check for near-duplicates
+            if lsh.query(mh):
+                stats["near_dupes"] += 1
+                continue
+
+            # Insert into LSH index
+            email_id = email.get("Message-ID") or str(len(kept))
+            lsh.insert(email_id, mh)
+
+        kept.append(email)
+
+    stats["kept"] = len(kept)
+    stats["removed"] = len(candidates) - len(kept)
+
+    if not quiet:
+        print(f"Deduplication: {stats['exact_dupes']} exact, {stats['near_dupes']} near-duplicates removed")
+
+    return kept, stats
+
+
 def build_shortlist(
     input_path: str,
     output_path: str = "style_shortlist.csv",
     per_topic: int = 200,
     min_chars: int = 200,
+    dedupe: bool = True,
+    dedupe_threshold: float = 0.8,
     quiet: bool = False
 ) -> Dict[str, Any]:
     """
@@ -655,6 +742,8 @@ def build_shortlist(
         output_path: Path to output CSV
         per_topic: Max emails per topic bucket
         min_chars: Minimum body length
+        dedupe: If True, remove duplicate and near-duplicate emails
+        dedupe_threshold: Jaccard similarity threshold for near-duplicates
         quiet: If True, suppress progress output
 
     Returns:
@@ -670,6 +759,13 @@ def build_shortlist(
     candidates = [e for e in emails if is_style_candidate(e, min_chars)]
     if not quiet:
         print(f"{len(candidates)} passed candidate filter")
+
+    # Deduplicate
+    dedupe_stats = None
+    if dedupe:
+        candidates, dedupe_stats = deduplicate_emails(candidates, dedupe_threshold, quiet)
+        if not quiet:
+            print(f"{len(candidates)} after deduplication")
 
     # Bucket by topic
     buckets: Dict[str, List[Dict[str, Any]]] = {}
@@ -711,13 +807,16 @@ def build_shortlist(
                 e.get("_richness"),
             ])
 
-    return {
+    result = {
         "total_input": len(emails),
         "candidates": len(candidates),
         "shortlisted": len(shortlisted),
         "topics": topic_stats,
         "output": output_path
     }
+    if dedupe_stats:
+        result["deduplication"] = dedupe_stats
+    return result
 
 
 # =============================================================================
@@ -838,6 +937,9 @@ Examples:
     curate_parser.add_argument("--out", default="style_shortlist.csv", help="Output CSV file")
     curate_parser.add_argument("--per-topic", type=int, default=200, help="Max emails per topic")
     curate_parser.add_argument("--min-chars", type=int, default=200, help="Minimum body length")
+    curate_parser.add_argument("--no-dedupe", action="store_true", help="Skip deduplication")
+    curate_parser.add_argument("--dedupe-threshold", type=float, default=0.8,
+                               help="Similarity threshold for near-duplicate detection (0.0-1.0)")
 
     args = parser.parse_args()
 
@@ -860,8 +962,15 @@ Examples:
         print(f"Output: {results['output']}")
 
     elif args.command == "curate":
-        results = build_shortlist(args.input, args.out, args.per_topic, args.min_chars)
+        results = build_shortlist(
+            args.input, args.out, args.per_topic, args.min_chars,
+            dedupe=not args.no_dedupe,
+            dedupe_threshold=args.dedupe_threshold
+        )
         print(f"\nDone. Shortlisted {results['shortlisted']} emails.")
+        if "deduplication" in results:
+            d = results["deduplication"]
+            print(f"Removed {d['removed']} duplicates ({d['exact_dupes']} exact, {d['near_dupes']} near)")
         print(f"Output: {results['output']}")
 
     else:
