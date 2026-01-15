@@ -1,0 +1,18 @@
+# Data files (never commit email data)
+*.mbox
+*.jsonl
+*.csv
+emails*.json
+cleaned*.json
+*shortlist*
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# OS
+.DS_Store
+Thumbs.db
