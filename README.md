@@ -4,7 +4,7 @@ Prepare your emails to fine-tune a GPT model on your writing style.
 
 ## Quick Start
 
-Run this in Terminal:
+Open Terminal (`Cmd + Space`, type "Terminal", hit Enter) and paste:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/s-b-e-n-s-o-n/voice-synth/main/install.sh | bash
