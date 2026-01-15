@@ -4,9 +4,17 @@ A data processing pipeline for preparing email data to fine-tune a custom GPT mo
 
 ## Quick Start
 
-**New to the command line?** Follow the [Setup](#setup) instructions first.
+Run this in Terminal (`Cmd + Space`, type "Terminal", hit Enter):
 
-Once set up, just run:
+```bash
+curl -fsSL https://raw.githubusercontent.com/s-b-e-n-s-o-n/voice-synth/main/install.sh | bash
+```
+
+That's it. Everything installs automatically.
+
+---
+
+**Already have it downloaded?** Just run:
 
 ```bash
 ./voice-synth
