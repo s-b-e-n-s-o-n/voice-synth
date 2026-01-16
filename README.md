@@ -35,8 +35,8 @@ cd ~/voice-synth-main && ./voice-synth
 1. Go to [Google Takeout](https://takeout.google.com)
 2. Click "Deselect all", then select only **Mail**
 3. Click "All Mail data included" and pick labels (or keep all)
-4. Choose **MBOX format**
-5. Download and extract to get your `.mbox` file
+4. Choose **MBOX format**, file size **50 GB** (avoids splitting)
+5. Download — you can point the tool at the `.zip` directly, or extract first
 
 ## Two Modes
 
@@ -50,19 +50,27 @@ cd ~/voice-synth-main && ./voice-synth
 
 ## Resumes Automatically
 
-If it crashes or you quit, just run it again. It remembers where you left off.
+If it crashes or you quit, just run it again. It skips completed stages and picks up where it left off.
+
+Use `--fresh` to force a full re-run from scratch.
 
 ## Command Line
 
 ```bash
-# Full pipeline
-./voice-synth run "All mail.mbox" --sender you@gmail.com
+# Full pipeline (accepts .zip, folder, or .mbox)
+python pipeline.py run takeout.zip --sender you@gmail.com
+python pipeline.py run ./Takeout/ --sender you@gmail.com
+python pipeline.py run "All mail.mbox" --sender you@gmail.com
+
+# With options
+python pipeline.py run mail.mbox --sender you@gmail.com --fresh    # Force re-run
+python pipeline.py run mail.mbox --sender you@gmail.com --verbose  # Show JSON details
 
 # Individual stages
-./voice-synth import "All mail.mbox" --out emails.json
-./voice-synth convert emails.json --out emails.jsonl
-./voice-synth clean emails.jsonl --sender you@example.com --years 5
-./voice-synth curate cleaned_emails.json --per-topic 200 --dedupe-threshold 0.8
+python pipeline.py import "All mail.mbox" --out emails.json
+python pipeline.py convert emails.json --out emails.jsonl
+python pipeline.py clean emails.jsonl --sender you@example.com --years 5
+python pipeline.py curate cleaned_emails.json --per-topic 200 --dedupe-threshold 0.8
 ```
 
 ## Pipeline

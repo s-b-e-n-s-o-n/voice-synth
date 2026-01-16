@@ -91,30 +91,85 @@ def extract_body_from_message(msg) -> Tuple[str, str]:
     return plain_body, html_body
 
 
-def import_mbox(
-    input_path: str,
-    output_path: Optional[str] = None,
-    quiet: bool = False
-) -> Dict[str, Any]:
+def find_mbox_files(input_path: str, quiet: bool = False) -> List[str]:
     """
-    Import an MBOX file (e.g., from Google Takeout) to JSON.
-    Strips attachments, keeps only text content.
+    Find all MBOX files from a path (file, directory, or zip).
 
     Args:
-        input_path: Path to MBOX file
-        output_path: Path to output JSON file (default: input with .json extension)
+        input_path: Path to MBOX file, directory, or zip file
         quiet: If True, suppress progress output
 
     Returns:
-        Statistics dict
+        List of paths to MBOX files
     """
-    if output_path is None:
-        base = input_path.rsplit(".", 1)[0] if "." in input_path else input_path
-        output_path = base + ".json"
+    import glob
+    import tempfile
+    import zipfile
 
-    if not quiet:
-        print(f"Opening MBOX file: {input_path}")
+    input_path = os.path.abspath(input_path)
 
+    # Case 1: Single MBOX file
+    if os.path.isfile(input_path) and input_path.lower().endswith('.mbox'):
+        if not quiet:
+            print(f"📄 Found single MBOX file")
+        return [input_path]
+
+    # Case 2: ZIP file (Google Takeout export)
+    if os.path.isfile(input_path) and input_path.lower().endswith('.zip'):
+        if not quiet:
+            print(f"📦 Extracting ZIP file: {os.path.basename(input_path)}")
+
+        # Extract to a directory next to the zip
+        extract_dir = input_path.rsplit('.', 1)[0] + "_extracted"
+        os.makedirs(extract_dir, exist_ok=True)
+
+        with zipfile.ZipFile(input_path, 'r') as zf:
+            zf.extractall(extract_dir)
+
+        if not quiet:
+            print(f"📂 Extracted to: {extract_dir}")
+
+        # Now search the extracted directory
+        input_path = extract_dir
+
+    # Case 3: Directory - glob for all MBOX files
+    if os.path.isdir(input_path):
+        mbox_files = glob.glob(os.path.join(input_path, '**', '*.mbox'), recursive=True)
+        mbox_files.sort()  # Consistent ordering
+
+        if not quiet:
+            if len(mbox_files) == 0:
+                print(f"⚠️  No .mbox files found in: {input_path}")
+            elif len(mbox_files) == 1:
+                print(f"📄 Found 1 MBOX file in directory")
+            else:
+                print(f"📚 Found {len(mbox_files)} MBOX files:")
+                for f in mbox_files:
+                    rel_path = os.path.relpath(f, input_path)
+                    size_mb = os.path.getsize(f) / (1024 * 1024)
+                    print(f"   └── {rel_path} ({size_mb:.1f} MB)")
+
+        return mbox_files
+
+    # Fallback: treat as single file path
+    if os.path.isfile(input_path):
+        if not quiet:
+            print(f"📄 Using file: {os.path.basename(input_path)}")
+        return [input_path]
+
+    return []
+
+
+def import_mbox_single(
+    input_path: str,
+    quiet: bool = False
+) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
+    """
+    Import a single MBOX file to a list of email dicts.
+
+    Returns:
+        Tuple of (emails_list, stats_dict)
+    """
     mbox = mailbox.mbox(input_path)
     emails = []
     total = 0
@@ -124,7 +179,7 @@ def import_mbox(
         total += 1
 
         if not quiet and total % 500 == 0:
-            print(f"  Processed {total} messages...")
+            print(f"      Processed {total} messages...")
 
         try:
             # Extract headers
@@ -161,24 +216,104 @@ def import_mbox(
 
         except Exception as e:
             if not quiet:
-                print(f"  Warning: Failed to parse message {total}: {e}")
+                print(f"      Warning: Failed to parse message {total}: {e}")
             skipped += 1
             continue
 
     mbox.close()
 
+    return emails, {"total": total, "imported": len(emails), "skipped": skipped}
+
+
+def import_mbox(
+    input_path: str,
+    output_path: Optional[str] = None,
+    quiet: bool = False
+) -> Dict[str, Any]:
+    """
+    Import MBOX file(s) from a path (file, directory, or zip) to JSON.
+    Strips attachments, keeps only text content.
+
+    Supports:
+    - Single .mbox file
+    - Directory containing .mbox files (searches recursively)
+    - .zip file (Google Takeout export - extracts and finds .mbox files)
+
+    Args:
+        input_path: Path to MBOX file, directory, or zip file
+        output_path: Path to output JSON file (default: emails_raw.json)
+        quiet: If True, suppress progress output
+
+    Returns:
+        Statistics dict
+    """
+    if output_path is None:
+        if os.path.isfile(input_path) and input_path.lower().endswith('.mbox'):
+            base = input_path.rsplit(".", 1)[0]
+            output_path = base + ".json"
+        else:
+            output_path = "emails_raw.json"
+
     if not quiet:
-        print(f"Writing {len(emails)} emails to {output_path}")
+        print(f"\n{'='*60}")
+        print(f"📥 IMPORTING EMAILS")
+        print(f"{'='*60}")
+
+    # Find all MBOX files
+    mbox_files = find_mbox_files(input_path, quiet=quiet)
+
+    if not mbox_files:
+        if not quiet:
+            print(f"\n❌ No MBOX files found!")
+            print(f"\n📋 INSTRUCTIONS:")
+            print(f"   1. Go to https://takeout.google.com")
+            print(f"   2. Select only 'Mail' and click 'Next'")
+            print(f"   3. Choose file size: 50 GB (to avoid splitting)")
+            print(f"   4. Download and either:")
+            print(f"      • Point to the .zip file directly")
+            print(f"      • Extract it and point to the folder")
+            print(f"      • Point to a specific .mbox file")
+            print(f"\n   Examples:")
+            print(f"      python pipeline.py run takeout.zip --sender you@gmail.com")
+            print(f"      python pipeline.py run ./Takeout/ --sender you@gmail.com")
+            print(f"      python pipeline.py run 'All mail.mbox' --sender you@gmail.com")
+        return {"total": 0, "imported": 0, "skipped": 0, "files": 0, "output": output_path}
+
+    # Import all MBOX files
+    all_emails = []
+    total_stats = {"total": 0, "imported": 0, "skipped": 0, "files": len(mbox_files)}
+
+    for i, mbox_path in enumerate(mbox_files, 1):
+        if not quiet:
+            rel_name = os.path.basename(mbox_path)
+            if len(mbox_files) > 1:
+                print(f"\n   📄 [{i}/{len(mbox_files)}] {rel_name}")
+            else:
+                print(f"\n   📄 {rel_name}")
+
+        emails, stats = import_mbox_single(mbox_path, quiet=quiet)
+        all_emails.extend(emails)
+
+        total_stats["total"] += stats["total"]
+        total_stats["imported"] += stats["imported"]
+        total_stats["skipped"] += stats["skipped"]
+
+        if not quiet:
+            print(f"      ✓ {stats['imported']} emails imported")
+
+    if not quiet:
+        print(f"\n{'─'*60}")
+        if len(mbox_files) > 1:
+            print(f"📊 TOTAL: {total_stats['imported']} emails from {len(mbox_files)} files")
+        else:
+            print(f"📊 TOTAL: {total_stats['imported']} emails")
+        print(f"💾 Saving to: {output_path}")
 
     with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(emails, f, ensure_ascii=False, indent=2)
+        json.dump(all_emails, f, ensure_ascii=False, indent=2)
 
-    return {
-        "total": total,
-        "imported": len(emails),
-        "skipped": skipped,
-        "output": output_path
-    }
+    total_stats["output"] = output_path
+    return total_stats
 
 
 # =============================================================================
@@ -262,6 +397,9 @@ def convert_to_jsonl(
 
     total = kept = 0
 
+    if not quiet:
+        print(f"   📂 Reading: {os.path.basename(input_path)}")
+
     with open(input_path, "r", encoding="utf-8") as fin, \
          open(output_path, "w", encoding="utf-8") as fout:
         for record in ijson.items(fin, "item"):
@@ -273,8 +411,12 @@ def convert_to_jsonl(
             json.dump(record, fout, ensure_ascii=False)
             fout.write("\n")
             kept += 1
-            if not quiet and total % 1000 == 0:
-                print(f"  Processed {total} records...")
+            if not quiet and total % 2000 == 0:
+                print(f"      ⏳ {total:,} records processed...")
+
+    if not quiet:
+        print(f"   ✓ Converted {kept:,} records")
+        print(f"   💾 Saved to: {os.path.basename(output_path)}")
 
     return {"total": total, "kept": kept, "output": output_path}
 
@@ -525,16 +667,19 @@ def clean_emails(
     results: List[Dict[str, Any]] = []
 
     if not quiet:
-        print("Loading Presidio analyzer...")
+        print(f"   🔒 Loading PII detection engine...")
     _ = get_analyzer()
     if not quiet:
-        print("Processing emails...")
+        if sender_email:
+            print(f"   📧 Filtering to sender: {sender_email}")
+        print(f"   📅 Keeping emails from past {years} years")
+        print(f"   ⏳ Processing...")
 
     for rec in iter_records(input_path):
         stats["total"] += 1
 
-        if not quiet and stats["total"] % 100 == 0:
-            print(f"  Processed {stats['total']} emails...")
+        if not quiet and stats["total"] % 500 == 0:
+            print(f"      {stats['total']:,} scanned, {len(results):,} kept...")
 
         # Sender filter
         sender_raw = get_field(rec, "From", "from", "Sender", "sender", "emailFrom", "email_from")
@@ -587,6 +732,21 @@ def clean_emails(
 
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(results, f, ensure_ascii=False, indent=2)
+
+    if not quiet:
+        print(f"\n   {'─'*50}")
+        print(f"   📊 CLEANING SUMMARY:")
+        print(f"      Total scanned:    {stats['total']:,}")
+        print(f"      ✓ Kept:           {stats['kept']:,}")
+        if stats['skipped_sender'] > 0:
+            print(f"      ✗ Wrong sender:   {stats['skipped_sender']:,}")
+        if stats['skipped_date'] > 0:
+            print(f"      ✗ Too old:        {stats['skipped_date']:,}")
+        if stats['skipped_auto'] > 0:
+            print(f"      ✗ Auto-replies:   {stats['skipped_auto']:,}")
+        if stats['skipped_empty'] > 0:
+            print(f"      ✗ Empty:          {stats['skipped_empty']:,}")
+        print(f"   💾 Saved to: {os.path.basename(output_path)}")
 
     stats["output"] = output_path
     return stats
@@ -720,7 +880,7 @@ def deduplicate_emails(
     stats["removed"] = len(candidates) - len(kept)
 
     if not quiet:
-        print(f"Deduplication: {stats['exact_dupes']} exact, {stats['near_dupes']} near-duplicates removed")
+        print(f"      🗑️  Removed {stats['exact_dupes']:,} exact + {stats['near_dupes']:,} near-duplicates")
 
     return kept, stats
 
@@ -753,21 +913,26 @@ def build_shortlist(
         emails = json.load(f)
 
     if not quiet:
-        print(f"Loaded {len(emails)} emails")
+        print(f"   📂 Loaded {len(emails):,} cleaned emails")
 
     # Filter candidates
     candidates = [e for e in emails if is_style_candidate(e, min_chars)]
+    filtered_out = len(emails) - len(candidates)
     if not quiet:
-        print(f"{len(candidates)} passed candidate filter")
+        print(f"   🔍 Quality filter: {len(candidates):,} candidates ({filtered_out:,} too short/boring)")
 
     # Deduplicate
     dedupe_stats = None
     if dedupe:
+        if not quiet:
+            print(f"   🧹 Removing duplicates...")
         candidates, dedupe_stats = deduplicate_emails(candidates, dedupe_threshold, quiet)
         if not quiet:
-            print(f"{len(candidates)} after deduplication")
+            print(f"      ✓ {len(candidates):,} unique emails remain")
 
     # Bucket by topic
+    if not quiet:
+        print(f"   🏷️  Categorizing by topic...")
     buckets: Dict[str, List[Dict[str, Any]]] = {}
     for e in candidates:
         topic = label_topic(e.get("Subject", ""), e.get("Body", ""))
@@ -778,12 +943,17 @@ def build_shortlist(
     # Select top N per topic
     shortlisted = []
     topic_stats = {}
-    for topic, items in buckets.items():
+    topic_emojis = {"client": "👔", "strategy": "🎯", "update": "📝", "feedback": "💬", "workshop": "🛠️", "other": "📋"}
+
+    if not quiet:
+        print(f"\n   📊 TOPIC BREAKDOWN:")
+    for topic, items in sorted(buckets.items(), key=lambda x: len(x[1]), reverse=True):
         items_sorted = sorted(items, key=lambda x: x["_richness"], reverse=True)
         picked = items_sorted[:per_topic]
         topic_stats[topic] = {"total": len(items), "selected": len(picked)}
+        emoji = topic_emojis.get(topic, "📋")
         if not quiet:
-            print(f"  {topic}: {len(items)} candidates, keeping {len(picked)}")
+            print(f"      {emoji} {topic}: {len(picked):,} selected (from {len(items):,})")
         shortlisted.extend(picked)
 
     # Write CSV
@@ -807,6 +977,12 @@ def build_shortlist(
                 e.get("_richness"),
             ])
 
+    if not quiet:
+        print(f"\n   {'─'*50}")
+        print(f"   ✅ CURATION COMPLETE!")
+        print(f"      {len(shortlisted):,} high-quality emails selected")
+        print(f"   💾 Saved to: {os.path.basename(output_path)}")
+
     result = {
         "total_input": len(emails),
         "candidates": len(candidates),
@@ -823,22 +999,46 @@ def build_shortlist(
 # FULL PIPELINE
 # =============================================================================
 
+def needs_mbox_import(input_path: str) -> bool:
+    """Check if input needs MBOX import (vs already being JSON)."""
+    lower = input_path.lower()
+    # Direct mbox file
+    if lower.endswith(".mbox"):
+        return True
+    # Zip file (Google Takeout)
+    if lower.endswith(".zip"):
+        return True
+    # Directory (might contain mbox files)
+    if os.path.isdir(input_path):
+        return True
+    # JSON files don't need import
+    if lower.endswith(".json") or lower.endswith(".jsonl"):
+        return False
+    # Default: assume it needs import
+    return True
+
+
 def run_pipeline(
     input_path: str,
     sender_email: Optional[str] = None,
     output_dir: str = ".",
     per_topic: int = 200,
-    quiet: bool = False
+    quiet: bool = False,
+    fresh: bool = False
 ) -> Dict[str, Any]:
     """
-    Run the full pipeline: import (if mbox) -> convert -> clean -> curate.
+    Run the full pipeline: import (if mbox/zip/dir) -> convert -> clean -> curate.
+
+    Supports graceful restart - skips stages if output files already exist.
+    Use fresh=True to force re-running all stages.
 
     Args:
-        input_path: Path to MBOX file or JSON file
+        input_path: Path to MBOX file, directory, zip file, or JSON file
         sender_email: Only keep emails from this sender
         output_dir: Directory for output files
         per_topic: Max emails per topic in shortlist
         quiet: If True, suppress progress output
+        fresh: If True, ignore existing files and re-run everything
 
     Returns:
         Combined statistics from all stages
@@ -849,34 +1049,98 @@ def run_pipeline(
     results = {}
     json_path = input_path
 
+    # Define output paths
+    raw_json_path = str(output_dir / "emails_raw.json")
+    jsonl_path = str(output_dir / "emails.jsonl")
+    cleaned_path = str(output_dir / "cleaned_emails.json")
+    shortlist_path = str(output_dir / "style_shortlist.csv")
+
     # Stage 0: Import MBOX (if needed)
-    if input_path.lower().endswith(".mbox"):
-        if not quiet:
-            print("\n=== Stage 0: Importing MBOX ===")
-        json_path = str(output_dir / "emails_raw.json")
-        results["import"] = import_mbox(input_path, json_path, quiet=quiet)
+    if needs_mbox_import(input_path):
+        json_path = raw_json_path
+
+        if not fresh and os.path.exists(json_path):
+            if not quiet:
+                size_mb = os.path.getsize(json_path) / (1024 * 1024)
+                print(f"\n⏭️  SKIPPING IMPORT (found existing emails_raw.json, {size_mb:.1f} MB)")
+                print(f"   Use --fresh to re-import from source")
+            # Load stats from existing file
+            with open(json_path, "r") as f:
+                data = json.load(f)
+                count = len(data) if isinstance(data, list) else 1
+            results["import"] = {"total": count, "imported": count, "skipped": 0, "output": json_path, "resumed": True}
+        else:
+            results["import"] = import_mbox(input_path, json_path, quiet=quiet)
+
+            # Check if any emails were imported
+            if results["import"]["imported"] == 0:
+                if not quiet:
+                    print("\n❌ Pipeline stopped: No emails to process")
+                return results
 
     # Stage 1: Convert to JSONL
-    if not quiet:
-        print("\n=== Stage 1: Converting to JSONL ===")
-    jsonl_path = str(output_dir / "emails.jsonl")
-    results["convert"] = convert_to_jsonl(json_path, jsonl_path, quiet=quiet)
+    if not fresh and os.path.exists(jsonl_path):
+        if not quiet:
+            size_mb = os.path.getsize(jsonl_path) / (1024 * 1024)
+            print(f"\n⏭️  SKIPPING CONVERT (found existing emails.jsonl, {size_mb:.1f} MB)")
+        with open(jsonl_path, "r") as f:
+            count = sum(1 for _ in f)
+        results["convert"] = {"total": count, "kept": count, "output": jsonl_path, "resumed": True}
+    else:
+        if not quiet:
+            print(f"\n{'='*60}")
+            print(f"🔄 STAGE 1: FORMAT CONVERSION")
+            print(f"{'='*60}")
+        results["convert"] = convert_to_jsonl(json_path, jsonl_path, quiet=quiet)
 
     # Stage 2: Clean & Anonymize
-    if not quiet:
-        print("\n=== Stage 2: Cleaning & Anonymizing ===")
-    cleaned_path = str(output_dir / "cleaned_emails.json")
-    results["clean"] = clean_emails(jsonl_path, cleaned_path, sender_email, quiet=quiet)
+    if not fresh and os.path.exists(cleaned_path):
+        if not quiet:
+            size_mb = os.path.getsize(cleaned_path) / (1024 * 1024)
+            print(f"\n⏭️  SKIPPING CLEAN (found existing cleaned_emails.json, {size_mb:.1f} MB)")
+        with open(cleaned_path, "r") as f:
+            data = json.load(f)
+        results["clean"] = {"total": len(data), "kept": len(data), "output": cleaned_path, "resumed": True}
+    else:
+        if not quiet:
+            print(f"\n{'='*60}")
+            print(f"🔒 STAGE 2: CLEANING & PII ANONYMIZATION")
+            print(f"{'='*60}")
+        results["clean"] = clean_emails(jsonl_path, cleaned_path, sender_email, quiet=quiet)
+
+        # Check if any emails passed cleaning
+        if results["clean"]["kept"] == 0:
+            if not quiet:
+                print(f"\n❌ No emails passed cleaning filters!")
+                print(f"   Check your --sender email address or date range.")
+            return results
 
     # Stage 3: Curate Shortlist
-    if not quiet:
-        print("\n=== Stage 3: Building Shortlist ===")
-    shortlist_path = str(output_dir / "style_shortlist.csv")
-    results["curate"] = build_shortlist(cleaned_path, shortlist_path, per_topic, quiet=quiet)
+    if not fresh and os.path.exists(shortlist_path):
+        if not quiet:
+            size_kb = os.path.getsize(shortlist_path) / 1024
+            print(f"\n⏭️  SKIPPING CURATE (found existing style_shortlist.csv, {size_kb:.1f} KB)")
+        with open(shortlist_path, "r") as f:
+            count = sum(1 for _ in f) - 1  # minus header
+        results["curate"] = {"total_input": results["clean"]["kept"], "shortlisted": count, "output": shortlist_path, "resumed": True}
+    else:
+        if not quiet:
+            print(f"\n{'='*60}")
+            print(f"⭐ STAGE 3: QUALITY CURATION")
+            print(f"{'='*60}")
+        results["curate"] = build_shortlist(cleaned_path, shortlist_path, per_topic, quiet=quiet)
 
     if not quiet:
-        print("\n=== Pipeline Complete ===")
-        print(f"  Shortlist: {shortlist_path}")
+        print(f"\n{'='*60}")
+        print(f"🎉 PIPELINE COMPLETE!")
+        print(f"{'='*60}")
+        print(f"\n   📁 Output files in: {output_dir}/")
+        print(f"      • emails_raw.json     - Raw imported emails")
+        print(f"      • emails.jsonl        - Converted format")
+        print(f"      • cleaned_emails.json - Anonymized emails")
+        print(f"      • style_shortlist.csv - ⭐ Final curated samples")
+        print(f"\n   📊 Final count: {results['curate']['shortlisted']:,} style samples ready!")
+        print(f"\n   🚀 Next step: Use style_shortlist.csv for fine-tuning\n")
 
     return results
 
@@ -890,32 +1154,49 @@ def main():
         description="Voice Synthesizer - Email data preparation pipeline",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Examples:
-  # Full pipeline from MBOX (Google Takeout)
-  python pipeline.py run "All mail.mbox" --sender user@example.com
+📦 GOOGLE TAKEOUT INSTRUCTIONS:
+  1. Go to https://takeout.google.com
+  2. Deselect all, then select only 'Mail'
+  3. Click 'Next' → Choose 'Export once'
+  4. File size: Select 50 GB (avoids splitting into multiple zips)
+  5. Download when ready
 
-  # Full pipeline from JSON
-  python pipeline.py run emails.json --sender user@example.com
+📂 SUPPORTED INPUT FORMATS:
+  • .zip file    → Extracts and finds all .mbox files
+  • directory/   → Searches recursively for .mbox files
+  • .mbox file   → Processes single file directly
+  • .json file   → Skips import, starts at conversion stage
+
+💡 EXAMPLES:
+  # Full pipeline from Google Takeout zip
+  python pipeline.py run takeout.zip --sender you@gmail.com
+
+  # Full pipeline from extracted folder
+  python pipeline.py run ./Takeout/ --sender you@gmail.com
+
+  # Full pipeline from single MBOX
+  python pipeline.py run "All mail.mbox" --sender you@gmail.com
 
   # Individual stages
-  python pipeline.py import "All mail.mbox" --out emails.json
-  python pipeline.py convert emails.json --out emails.jsonl
-  python pipeline.py clean emails.jsonl --sender user@example.com
+  python pipeline.py import ./Takeout/ --out emails.json
+  python pipeline.py clean emails.jsonl --sender you@gmail.com
   python pipeline.py curate cleaned_emails.json --per-topic 100
         """
     )
     subparsers = parser.add_subparsers(dest="command", help="Command to run")
 
     # Run full pipeline
-    run_parser = subparsers.add_parser("run", help="Run full pipeline (MBOX or JSON input)")
-    run_parser.add_argument("input", help="Input MBOX or JSON file")
+    run_parser = subparsers.add_parser("run", help="Run full pipeline")
+    run_parser.add_argument("input", help="Input: .zip, directory, .mbox, or .json file")
     run_parser.add_argument("--sender", help="Filter to emails from this sender")
     run_parser.add_argument("--output-dir", default=".", help="Output directory")
     run_parser.add_argument("--per-topic", type=int, default=200, help="Max emails per topic")
+    run_parser.add_argument("--verbose", "-v", action="store_true", help="Show detailed JSON output")
+    run_parser.add_argument("--fresh", action="store_true", help="Ignore existing files and re-run all stages")
 
     # Import MBOX
-    import_parser = subparsers.add_parser("import", help="Import MBOX file to JSON")
-    import_parser.add_argument("input", help="Input MBOX file (from Google Takeout)")
+    import_parser = subparsers.add_parser("import", help="Import MBOX/zip/directory to JSON")
+    import_parser.add_argument("input", help="Input: .zip, directory, or .mbox file")
     import_parser.add_argument("--out", help="Output JSON file")
 
     # Convert JSON to JSONL
@@ -944,13 +1225,42 @@ Examples:
     args = parser.parse_args()
 
     if args.command == "run":
-        results = run_pipeline(args.input, args.sender, args.output_dir, args.per_topic)
-        print(json.dumps(results, indent=2, default=str))
+        results = run_pipeline(args.input, args.sender, args.output_dir, args.per_topic, fresh=args.fresh)
+
+        # Show summary table (unless pipeline failed early)
+        if "curate" in results:
+            print(f"\n{'─'*60}")
+            print(f"📊 PIPELINE SUMMARY")
+            print(f"{'─'*60}")
+            print(f"{'Stage':<20} {'Input':>12} {'Output':>12} {'Filtered':>12}")
+            print(f"{'─'*20} {'─'*12} {'─'*12} {'─'*12}")
+
+            if "import" in results:
+                imp = results["import"]
+                print(f"{'Import':<20} {imp['total']:>12,} {imp['imported']:>12,} {imp['skipped']:>12,}")
+
+            conv = results["convert"]
+            print(f"{'Convert':<20} {conv['total']:>12,} {conv['kept']:>12,} {conv['total']-conv['kept']:>12,}")
+
+            clean = results["clean"]
+            print(f"{'Clean & Anonymize':<20} {clean['total']:>12,} {clean['kept']:>12,} {clean['total']-clean['kept']:>12,}")
+
+            curate = results["curate"]
+            print(f"{'Curate':<20} {curate['total_input']:>12,} {curate['shortlisted']:>12,} {curate['total_input']-curate['shortlisted']:>12,}")
+
+            print(f"{'─'*60}")
+
+        # Verbose: show full JSON
+        if args.verbose:
+            print(f"\n📋 VERBOSE OUTPUT:")
+            print(json.dumps(results, indent=2, default=str))
 
     elif args.command == "import":
         results = import_mbox(args.input, args.out)
-        print(f"\nDone. Imported {results['imported']} of {results['total']} emails.")
-        print(f"Output: {results['output']}")
+        if results['imported'] > 0:
+            files_msg = f" from {results['files']} files" if results.get('files', 1) > 1 else ""
+            print(f"\n✅ Done! Imported {results['imported']} of {results['total']} emails{files_msg}.")
+            print(f"📄 Output: {results['output']}")
 
     elif args.command == "convert":
         results = convert_to_jsonl(args.input, args.out, not args.no_filter)

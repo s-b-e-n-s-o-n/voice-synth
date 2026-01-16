@@ -685,6 +685,20 @@ run_full_pipeline_advanced() {
     dedupe_threshold=$("$GUM" input --value "0.8" --placeholder "0.8" --width 20)
     dedupe_threshold="${dedupe_threshold:-0.8}"
 
+    # Step 7: Verbose output
+    show_header
+    center "$("$GUM" style --foreground 99 --bold 'Step 7: Output verbosity')"
+    echo ""
+    center "$("$GUM" style --foreground 245 'Show detailed JSON output at the end?')"
+    center "$("$GUM" style --foreground 245 --italic 'Useful for debugging or piping to other tools.')"
+    echo ""
+    local verbose_choice
+    verbose_choice=$("$GUM" choose "${pad}No (default)" "${pad}Yes (verbose)")
+    local verbose_flag=""
+    if [[ "$verbose_choice" == *"Yes"* ]]; then
+        verbose_flag="--verbose"
+    fi
+
     # Run pipeline
     show_header
     center "$("$GUM" style --foreground 214 'Processing your emails...')"
@@ -698,11 +712,28 @@ run_full_pipeline_advanced() {
     abs_input=$(cd "$(dirname "$input_file")" && pwd)/$(basename "$input_file")
     save_job "$abs_input" "$work_dir" "in_progress"
 
-    # Run import if mbox
+    # Run pipeline stages with structured logging
+    "$GUM" log --level info "Starting pipeline..." file="$input_file"
+    echo ""
+
+    "$GUM" log --level info "Stage 0: Importing MBOX"
     "$PYTHON" pipeline.py import "$input_file" --out emails_raw.json
+    "$GUM" log --level info "Stage 0: Complete ✓"
+    echo ""
+
+    "$GUM" log --level info "Stage 1: Converting to JSONL"
     "$PYTHON" pipeline.py convert emails_raw.json --out emails.jsonl
+    "$GUM" log --level info "Stage 1: Complete ✓"
+    echo ""
+
+    "$GUM" log --level info "Stage 2: Cleaning & Anonymizing"
     "$PYTHON" pipeline.py clean emails.jsonl --out cleaned_emails.json $sender_arg --years "$years"
+    "$GUM" log --level info "Stage 2: Complete ✓"
+    echo ""
+
+    "$GUM" log --level info "Stage 3: Curating Shortlist"
     "$PYTHON" pipeline.py curate cleaned_emails.json --out style_shortlist.csv --per-topic "$per_topic" --min-chars "$min_chars" --dedupe-threshold "$dedupe_threshold"
+    "$GUM" log --level info "Stage 3: Complete ✓"
 
     # Mark job as completed
     save_job "$abs_input" "$work_dir" "completed"
@@ -711,69 +742,104 @@ run_full_pipeline_advanced() {
     local desktop_path="$HOME/Desktop/style_shortlist.csv"
     cp style_shortlist.csv "$desktop_path" 2>/dev/null || true
 
+    # Count results for summary
+    local imported_count cleaned_count final_count filtered_count
+    imported_count=$(python3 -c "import json; print(len(json.load(open('emails_raw.json'))))" 2>/dev/null || echo "0")
+    cleaned_count=$(python3 -c "import json; print(len(json.load(open('cleaned_emails.json'))))" 2>/dev/null || echo "0")
+    final_count=$(tail -n +2 style_shortlist.csv 2>/dev/null | wc -l | tr -d ' ' || echo "0")
+    filtered_count=$((imported_count - cleaned_count))
+
     echo ""
-    center "$("$GUM" style --foreground 82 --bold 'Done!')"
+    center "$("$GUM" style --foreground 82 --bold '🎉 Done!')"
     echo ""
-    center "$("$GUM" style --foreground 82 --bold 'Output saved to Desktop:')"
+
+    # Summary table using gum table
+    center "$("$GUM" style --foreground 99 '📊 PIPELINE SUMMARY')"
+    echo ""
+    printf "Stage,Count,Status\nImported,%s,✓\nCleaned,%s,✓\nFiltered,%s,🗑️\nFinal,%s,⭐\n" \
+        "$imported_count" "$cleaned_count" "$filtered_count" "$final_count" | \
+        "$GUM" table --border rounded --border.foreground 99
+    echo ""
+
+    center "$("$GUM" style --foreground 82 '📁 Output saved to Desktop:')"
     center "$("$GUM" style --foreground 82 '~/Desktop/style_shortlist.csv')"
     echo ""
     center "$("$GUM" style --foreground 245 --italic 'Open it in a spreadsheet to review your emails.')"
+
+    # Verbose output with gum pager for scrolling
+    if [ -n "$verbose_flag" ]; then
+        echo ""
+        center "$("$GUM" style --foreground 99 '📋 VERBOSE OUTPUT')"
+        echo ""
+        {
+            echo "# Pipeline Results"
+            echo ""
+            echo "## emails_raw.json"
+            echo "Records: $imported_count"
+            echo ""
+            echo "## cleaned_emails.json"
+            echo "Records: $cleaned_count"
+            echo ""
+            echo "## style_shortlist.csv (first 10 rows)"
+            echo '```'
+            head -11 style_shortlist.csv
+            echo '```'
+        } | "$GUM" format | "$GUM" pager
+    fi
+
     echo ""
     printf '%s' "$pad"
     "$GUM" input --placeholder "Press Enter to continue..."
 }
 
-# Show help
+# Show help with markdown rendering
 show_help() {
     show_header
-    center "$("$GUM" style --foreground 99 --bold 'Help')"
+    center "$("$GUM" style --foreground 99 --bold '📖 Help')"
     echo ""
 
-    "$GUM" style --width "$WIDTH" --align left --padding "0 4" << 'EOF'
-Voice Synthesizer prepares email data for fine-tuning GPT models.
+    # Render markdown help with gum format and show in pager
+    "$GUM" format << 'EOF' | "$GUM" pager --border rounded --border.foreground 99
 
-PIPELINE STAGES:
+# Voice Synthesizer
 
-  0. Import     Import MBOX file from Google Takeout
-                Strips attachments, extracts text content
+Prepare email data for fine-tuning GPT models on your writing style.
 
-  1. Convert    Convert JSON array to JSONL format
-                Strips remaining attachments and unsafe fields
+## 📦 Pipeline Stages
 
-  2. Clean      Filter and anonymize emails
-                Uses Microsoft Presidio for PII detection
-                Removes signatures, quoted replies
+| Stage | Name | Description |
+|-------|------|-------------|
+| 0 | **Import** | Import MBOX from Google Takeout, strip attachments |
+| 1 | **Convert** | Convert JSON to JSONL, filter unsafe fields |
+| 2 | **Clean** | Anonymize PII with Presidio, remove signatures |
+| 3 | **Curate** | Score by richness, group by topic, output CSV |
 
-  3. Curate     Build a shortlist of best samples
-                Groups by topic, scores by richness
-                Outputs CSV for manual review
+## 🚀 Quick Start
 
-TYPICAL WORKFLOW:
+1. Go to [takeout.google.com](https://takeout.google.com)
+2. Select **only Mail** → Export as **MBOX**
+3. Run this tool and select your `.mbox` file
+4. Enter your email to filter to emails **you wrote**
+5. Review `style_shortlist.csv` in a spreadsheet
 
-  1. Download your emails via Google Takeout (select MBOX format)
-  2. Run "Full Pipeline" and select your .mbox file
-  3. Enter your email address to filter to emails you sent
-  4. Review the CSV shortlist in a spreadsheet
-  5. Use selected samples for fine-tuning
+## ⚙️ Requirements
 
-REQUIREMENTS:
+- Python 3.8+
+- gum (auto-downloaded if missing)
 
-  - Python 3.8+
-  - gum (for this TUI)
+## 📁 Files
 
-INSTALLATION:
+Dependencies are installed to:
+```
+~/.cache/voice-synth/venv
+```
 
-  Python dependencies are automatically installed to an isolated
-  virtual environment at ~/.cache/voice-synth/venv
+To reset, delete that directory and restart.
 
-  To reset the environment, delete the directory and restart.
+---
+*Press `q` to close this help*
+
 EOF
-
-    echo ""
-    local pad
-    pad=$(get_padding $ITEM_WIDTH)
-    printf '%s' "$pad"
-    "$GUM" input --placeholder "Press Enter to continue..."
 }
 
 # Uninstall/cleanup
@@ -788,7 +854,7 @@ run_cleanup() {
     local pad
     pad=$(get_padding 40)
     printf '%s' "$pad"
-    if "$GUM" confirm "Delete everything and uninstall?"; then
+    if "$GUM" confirm --timeout 30s --default=false "Delete everything and uninstall?"; then
         echo ""
         "$GUM" spin --spinner dot --title "Removing installed files..." -- \
             rm -rf "$CACHE_DIR"
