@@ -6,7 +6,7 @@
 
 set -e
 
-VERSION="0.1.1-alpha"
+VERSION="0.1.2-alpha"
 
 # Directory for isolated venv and cache
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/voice-synth"
@@ -356,8 +356,7 @@ pick_file() {
         else
             center "$("$GUM" style --foreground 214 "No $pattern files found.")"
             center "$("$GUM" style --foreground 245 --italic 'Enter path manually:')"
-            printf '%s' "$pad"
-            "$GUM" input --placeholder "Enter file path..."
+            "$GUM" input --placeholder "Enter file path..." --width 80
         fi
     fi
 }
@@ -376,8 +375,7 @@ get_sender() {
 
     if [[ "$choice" == "Yes"* ]]; then
         echo ""
-        printf '%s' "$pad"
-        "$GUM" input --placeholder "Enter sender email (e.g., user@example.com)" --width 50
+        "$GUM" input --placeholder "Enter sender email (e.g., user@example.com)" --width 80
     else
         echo ""
     fi
@@ -401,7 +399,6 @@ run_import() {
     if [ -z "$input_file" ] || [ ! -f "$input_file" ]; then
         echo ""
         center "$("$GUM" style --foreground 196 "File not found: $input_file")"
-        printf '%s' "$pad"
         "$GUM" input --placeholder "Press Enter to continue..."
         return 1
     fi
@@ -417,7 +414,6 @@ run_import() {
 
     echo ""
     center "$("$GUM" style --foreground 82 "Done! Created: $output_file")"
-    printf '%s' "$pad"
     "$GUM" input --placeholder "Press Enter to continue..."
 }
 
@@ -436,7 +432,6 @@ run_convert() {
     if [ -z "$input_file" ] || [ ! -f "$input_file" ]; then
         echo ""
         center "$("$GUM" style --foreground 196 "File not found: $input_file")"
-        printf '%s' "$pad"
         "$GUM" input --placeholder "Press Enter to continue..."
         return 1
     fi
@@ -450,7 +445,6 @@ run_convert() {
         "$PYTHON" pipeline.py convert "$input_file" --out "$output_file"
 
     center "$("$GUM" style --foreground 82 "Done! Created: $output_file")"
-    printf '%s' "$pad"
     "$GUM" input --placeholder "Press Enter to continue..."
 }
 
@@ -469,7 +463,6 @@ run_clean() {
     if [ -z "$input_file" ] || [ ! -f "$input_file" ]; then
         echo ""
         center "$("$GUM" style --foreground 196 "File not found: $input_file")"
-        printf '%s' "$pad"
         "$GUM" input --placeholder "Press Enter to continue..."
         return 1
     fi
@@ -494,7 +487,6 @@ run_clean() {
 
     echo ""
     center "$("$GUM" style --foreground 82 "Done! Created: $output_file")"
-    printf '%s' "$pad"
     "$GUM" input --placeholder "Press Enter to continue..."
 }
 
@@ -513,16 +505,14 @@ run_curate() {
     if [ -z "$input_file" ] || [ ! -f "$input_file" ]; then
         echo ""
         center "$("$GUM" style --foreground 196 "File not found: $input_file")"
-        printf '%s' "$pad"
         "$GUM" input --placeholder "Press Enter to continue..."
         return 1
     fi
 
     echo ""
     center "$("$GUM" style --foreground 245 'Max emails per topic:')"
-    printf '%s' "$pad"
     local per_topic
-    per_topic=$("$GUM" input --value "200" --placeholder "200" --width 20)
+    per_topic=$("$GUM" input --value "200" --placeholder "200" --width 80)
     per_topic="${per_topic:-200}"
 
     local output_file="style_shortlist.csv"
@@ -535,7 +525,6 @@ run_curate() {
     echo ""
     center "$("$GUM" style --foreground 82 "Done! Created: $output_file")"
     center "$("$GUM" style --foreground 245 'Open in a spreadsheet to review and annotate.')"
-    printf '%s' "$pad"
     "$GUM" input --placeholder "Press Enter to continue..."
 }
 
@@ -555,7 +544,6 @@ run_full_pipeline() {
     if [ -z "$input_file" ] || [ ! -f "$input_file" ]; then
         echo ""
         center "$("$GUM" style --foreground 196 "File not found: $input_file")"
-        printf '%s' "$pad"
         "$GUM" input --placeholder "Press Enter to continue..."
         return 1
     fi
@@ -597,7 +585,6 @@ run_full_pipeline() {
     echo ""
     center "$("$GUM" style --foreground 245 --italic 'Open it in a spreadsheet to review your emails.')"
     echo ""
-    printf '%s' "$pad"
     "$GUM" input --placeholder "Press Enter to continue..."
 }
 
@@ -621,7 +608,6 @@ run_full_pipeline_advanced() {
     if [ -z "$input_file" ] || [ ! -f "$input_file" ]; then
         echo ""
         center "$("$GUM" style --foreground 196 "File not found: $input_file")"
-        printf '%s' "$pad"
         "$GUM" input --placeholder "Press Enter to continue..."
         return 1
     fi
@@ -648,9 +634,8 @@ run_full_pipeline_advanced() {
     center "$("$GUM" style --foreground 245 'How many years back should we look?')"
     center "$("$GUM" style --foreground 245 --italic 'Older emails may not reflect your current writing style.')"
     echo ""
-    printf '%s' "$pad"
     local years
-    years=$("$GUM" input --value "5" --placeholder "5" --width 20)
+    years=$("$GUM" input --value "5" --placeholder "5" --width 80)
     years="${years:-5}"
 
     # Step 4: Emails per topic
@@ -660,9 +645,8 @@ run_full_pipeline_advanced() {
     center "$("$GUM" style --foreground 245 'Max emails to keep per topic (client, strategy, etc.)')"
     center "$("$GUM" style --foreground 245 --italic 'This ensures balanced training data across different types.')"
     echo ""
-    printf '%s' "$pad"
     local per_topic
-    per_topic=$("$GUM" input --value "200" --placeholder "200" --width 20)
+    per_topic=$("$GUM" input --value "200" --placeholder "200" --width 80)
     per_topic="${per_topic:-200}"
 
     # Step 5: Minimum length
@@ -672,9 +656,8 @@ run_full_pipeline_advanced() {
     center "$("$GUM" style --foreground 245 'Minimum characters for an email to be included.')"
     center "$("$GUM" style --foreground 245 --italic 'Short emails like "Thanks!" don'\''t capture your style well.')"
     echo ""
-    printf '%s' "$pad"
     local min_chars
-    min_chars=$("$GUM" input --value "200" --placeholder "200" --width 20)
+    min_chars=$("$GUM" input --value "200" --placeholder "200" --width 80)
     min_chars="${min_chars:-200}"
 
     # Step 6: Dedupe threshold
@@ -684,9 +667,8 @@ run_full_pipeline_advanced() {
     center "$("$GUM" style --foreground 245 'How similar should two emails be to count as duplicates?')"
     center "$("$GUM" style --foreground 245 --italic '0.8 = 80% similar. Higher = stricter, fewer removed.')"
     echo ""
-    printf '%s' "$pad"
     local dedupe_threshold
-    dedupe_threshold=$("$GUM" input --value "0.8" --placeholder "0.8" --width 20)
+    dedupe_threshold=$("$GUM" input --value "0.8" --placeholder "0.8" --width 80)
     dedupe_threshold="${dedupe_threshold:-0.8}"
 
     # Step 7: Verbose output
@@ -792,7 +774,6 @@ run_full_pipeline_advanced() {
     fi
 
     echo ""
-    printf '%s' "$pad"
     "$GUM" input --placeholder "Press Enter to continue..."
 }
 
@@ -855,9 +836,6 @@ run_cleanup() {
     center "$("$GUM" style --foreground 245 --italic "$CACHE_DIR")"
     echo ""
 
-    local pad
-    pad=$(get_padding 40)
-    printf '%s' "$pad"
     if "$GUM" confirm --timeout 30s --default=false "Delete everything and uninstall?"; then
         echo ""
         "$GUM" spin --spinner dot --title "Removing installed files..." -- \
@@ -891,7 +869,6 @@ show_results() {
     echo ""
     center "$("$GUM" style --foreground 245 --italic 'Open it in a spreadsheet to review your emails.')"
     echo ""
-    printf '%s' "$pad"
     "$GUM" input --placeholder "Press Enter to continue..."
 }
 
@@ -988,7 +965,6 @@ if os.path.exists(jobs_file):
     echo ""
     center "$("$GUM" style --foreground 245 --italic 'Open it in a spreadsheet to review your emails.')"
     echo ""
-    printf '%s' "$pad"
     "$GUM" input --placeholder "Press Enter to continue..."
 }
 
