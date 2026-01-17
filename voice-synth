@@ -337,9 +337,11 @@ pick_file() {
         # Clean up path (remove quotes, escaped spaces, trailing spaces)
         path="${path//\'/}"
         path="${path//\"/}"
-        path="${path//\\ / }"  # unescape spaces
-        path="${path%% }"
-        path="${path## }"      # trim leading space
+        # Handle escaped spaces from drag-and-drop (backslash followed by space)
+        path=$(printf '%s' "$path" | sed 's/\\ / /g')
+        # Trim leading/trailing whitespace
+        path="${path#"${path%%[![:space:]]*}"}"
+        path="${path%"${path##*[![:space:]]}"}"
         echo "$path"
     else
         # Browse mode - find matching files
