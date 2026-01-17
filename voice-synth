@@ -6,7 +6,7 @@
 
 set -e
 
-VERSION="0.2.501-alpha"
+VERSION="0.2.502-alpha"
 
 # Directory for isolated venv and cache
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/voice-synth"
@@ -576,6 +576,9 @@ run_full_pipeline() {
         sender_arg="--sender $sender"
     fi
 
+    # Clear screen for processing phase
+    clear
+    show_header
     echo ""
     center "$("$GUM" style --foreground 214 'Processing your emails...')"
     center "$("$GUM" style --foreground 245 --italic 'This may take a few minutes for large mailboxes.')"
