@@ -333,7 +333,7 @@ pick_file() {
         center "$("$GUM" style --foreground 245 --italic 'Drag file here or paste path, then press Enter:')"
         local path
         printf '%s' "$pad"
-        path=$("$GUM" input --placeholder "Drop file here..." --width 60)
+        path=$("$GUM" input --placeholder "Drop file here...")
         # Clean up path (remove quotes, escaped spaces, trailing spaces)
         path="${path//\'/}"
         path="${path//\"/}"
@@ -355,7 +355,7 @@ pick_file() {
             center "$("$GUM" style --foreground 214 "No $pattern files found in current directory.")"
             center "$("$GUM" style --foreground 245 --italic 'Enter path manually:')"
             printf '%s' "$pad"
-            "$GUM" input --placeholder "Enter file path..." --width 60
+            "$GUM" input --placeholder "Enter file path..."
         fi
     fi
 }
