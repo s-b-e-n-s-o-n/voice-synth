@@ -325,46 +325,31 @@ def detect_owner_email(input_path: str, sample_size: int = 50) -> Optional[str]:
 
     Args:
         input_path: Path to mbox file
-        sample_size: Number of messages to sample
+        sample_size: Unused - we just grab the first match (instant)
 
     Returns:
         Owner's email address, or None if not detected
     """
-    from collections import Counter
+    import re
 
     mbox_files = find_mbox_files(input_path, quiet=True)
     if not mbox_files:
         return None
 
-    delivered_to_counts: Counter = Counter()
-
+    # Just read first few KB to find Delivered-To header - nearly instant
     for mbox_path in mbox_files:
         try:
-            mbox = mailbox.mbox(mbox_path)
-            count = 0
-
-            for message in mbox:
-                if count >= sample_size:
-                    break
-
-                # Delivered-To header shows the actual mailbox owner
-                delivered_to = message.get("Delivered-To", "")
-                if delivered_to:
-                    _, email = parseaddr(delivered_to)
+            with open(mbox_path, "r", encoding="utf-8", errors="ignore") as f:
+                chunk = f.read(8192)  # First 8KB has the headers
+                match = re.search(r"^Delivered-To:\s*(.+)$", chunk, re.MULTILINE | re.IGNORECASE)
+                if match:
+                    _, email = parseaddr(match.group(1).strip())
                     if email:
-                        delivered_to_counts[email.lower()] += 1
-                count += 1
-
-            mbox.close()
+                        return email.lower()
         except Exception:
             continue
 
-    if not delivered_to_counts:
-        return None
-
-    # Return the most common Delivered-To address (should be consistent)
-    most_common = delivered_to_counts.most_common(1)
-    return most_common[0][0] if most_common else None
+    return None
 
 
 # =============================================================================
