@@ -319,15 +319,32 @@ def import_mbox(
 def detect_owner_email(input_path: str, sample_size: int = 200) -> Optional[str]:
     """
     Detect the likely owner email from an mbox file by finding the most common sender.
+    Skips common group/shared email addresses.
 
     Args:
         input_path: Path to mbox file
         sample_size: Number of messages to sample
 
     Returns:
-        Most common email address, or None if not detected
+        Most common personal email address, or None if not detected
     """
     from collections import Counter
+
+    # Common group/shared email prefixes to skip
+    GROUP_PREFIXES = {
+        'it', 'support', 'help', 'info', 'admin', 'hr', 'sales', 'marketing',
+        'noreply', 'no-reply', 'donotreply', 'do-not-reply', 'team', 'hello',
+        'contact', 'billing', 'accounts', 'finance', 'office', 'ops',
+        'operations', 'service', 'services', 'notifications', 'alerts',
+        'system', 'mailer', 'postmaster', 'webmaster', 'abuse', 'security',
+        'legal', 'compliance', 'press', 'media', 'news', 'newsletter',
+        'feedback', 'enquiries', 'inquiries', 'general', 'all', 'everyone',
+    }
+
+    def is_group_email(email: str) -> bool:
+        """Check if email looks like a group/shared address."""
+        local_part = email.split('@')[0].lower()
+        return local_part in GROUP_PREFIXES
 
     mbox_files = find_mbox_files(input_path, quiet=True)
     if not mbox_files:
@@ -348,7 +365,7 @@ def detect_owner_email(input_path: str, sample_size: int = 200) -> Optional[str]
                 if from_addr:
                     # Parse email address from "Name <email>" format
                     _, email = parseaddr(from_addr)
-                    if email:
+                    if email and not is_group_email(email):
                         sender_counts[email.lower()] += 1
                 count += 1
 
@@ -359,7 +376,7 @@ def detect_owner_email(input_path: str, sample_size: int = 200) -> Optional[str]
     if not sender_counts:
         return None
 
-    # Return the most common sender
+    # Return the most common non-group sender
     most_common = sender_counts.most_common(1)
     return most_common[0][0] if most_common else None
 
