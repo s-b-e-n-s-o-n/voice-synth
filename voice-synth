@@ -6,7 +6,7 @@
 
 set -e
 
-VERSION="0.2.0-alpha"
+VERSION="0.2.1-alpha"
 
 # Directory for isolated venv and cache
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/voice-synth"
@@ -319,7 +319,7 @@ pick_file() {
     # All display output goes to stderr so only the path goes to stdout
     center "$("$GUM" style --foreground 245 "$prompt")" >&2
     echo "" >&2
-    center "$("$GUM" style --foreground 245 --italic 'Drag file from Finder into this window, then press Enter:')" >&2
+    center "$("$GUM" style --foreground 245 --italic '👆 Drag from Finder into this window, then press Enter')" >&2
 
     local raw_path
     raw_path=$("$GUM" input --placeholder "Drop file here..." --width 80)
@@ -351,7 +351,7 @@ get_sender() {
 
     # Try to auto-detect owner email from mbox
     if [ -n "$mbox_file" ] && [ -f "$mbox_file" ]; then
-        center "$("$GUM" style --foreground 245 'Detecting your email address...')" >&2
+        center "$("$GUM" style --foreground 245 '🔍 Detecting your email address...')" >&2
         detected_email=$("$PYTHON" pipeline.py detect-owner "$mbox_file" 2>/dev/null) || detected_email=""
     fi
 
@@ -361,7 +361,7 @@ get_sender() {
     if [ -n "$detected_email" ]; then
         # Found email - ask for confirmation
         echo "" >&2
-        center "$("$GUM" style --foreground 82 "Detected: $detected_email")" >&2
+        center "$("$GUM" style --foreground 82 "✅ Detected: $detected_email")" >&2
         echo "" >&2
         center "$("$GUM" style --foreground 245 'Filter to emails from this sender?')" >&2
         echo "" >&2
@@ -554,7 +554,7 @@ run_full_pipeline() {
     pad=$(get_padding $ITEM_WIDTH)
 
     local input_file
-    input_file=$(pick_file "Drop your .mbox file from Google Takeout:" "*.mbox")
+    input_file=$(pick_file "📧 Drop your Google Takeout export (.mbox, folder, or .zip):")
 
     if [ -z "$input_file" ] || [ ! -f "$input_file" ]; then
         echo ""
@@ -618,7 +618,7 @@ run_full_pipeline_advanced() {
     center "$("$GUM" style --foreground 99 --bold 'Step 1: Select your email file')"
     echo ""
     local input_file
-    input_file=$(pick_file "Drop your .mbox file from Google Takeout:" "*.mbox")
+    input_file=$(pick_file "📧 Drop your Google Takeout export (.mbox, folder, or .zip):")
 
     if [ -z "$input_file" ] || [ ! -f "$input_file" ]; then
         echo ""
