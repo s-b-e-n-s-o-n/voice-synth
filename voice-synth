@@ -6,7 +6,7 @@
 
 set -e
 
-VERSION="0.1.4-alpha"
+VERSION="0.1.5-alpha"
 
 # Directory for isolated venv and cache
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/voice-synth"
@@ -312,13 +312,15 @@ setup_deps() {
 }
 
 # File picker with multiple selection methods
+# Returns selected file path to stdout, displays UI to stderr
 pick_file() {
     local prompt="$1"
     local pattern="${2:-*.json}"
     local start_dir="${3:-$HOME/Downloads}"
 
-    center "$("$GUM" style --foreground 245 "$prompt")"
-    echo ""
+    # All display output goes to stderr so only the path goes to stdout
+    center "$("$GUM" style --foreground 245 "$prompt")" >&2
+    echo "" >&2
 
     local pad
     pad=$(get_padding $ITEM_WIDTH)
@@ -330,17 +332,17 @@ pick_file() {
         "${pad}Paste or type path")
     method="${method#"$pad"}"
 
-    echo ""
+    echo "" >&2
 
     if [[ "$method" == "Browse"* ]]; then
         # Use gum file picker - starts in Downloads by default
-        center "$("$GUM" style --foreground 245 --italic 'Navigate to your file and press Enter:')"
+        center "$("$GUM" style --foreground 245 --italic 'Navigate to your file and press Enter:')" >&2
         local browse_dir="$start_dir"
         [ -d "$browse_dir" ] || browse_dir="$HOME"
         "$GUM" file --file --height 15 "$browse_dir"
     else
         # Manual path entry mode
-        center "$("$GUM" style --foreground 245 --italic 'Paste or type the full file path:')"
+        center "$("$GUM" style --foreground 245 --italic 'Paste or type the full file path:')" >&2
         local raw_path
         raw_path=$("$GUM" input --placeholder "/path/to/file..." --width 80)
 
@@ -364,9 +366,10 @@ pick_file() {
 }
 
 # Get sender email
+# Returns sender email to stdout, displays UI to stderr
 get_sender() {
-    center "$("$GUM" style --foreground 245 'Filter to emails from a specific sender?')"
-    echo ""
+    center "$("$GUM" style --foreground 245 'Filter to emails from a specific sender?')" >&2
+    echo "" >&2
 
     local pad
     pad=$(get_padding $ITEM_WIDTH)
@@ -376,11 +379,10 @@ get_sender() {
     choice="${choice#"$pad"}"
 
     if [[ "$choice" == "Yes"* ]]; then
-        echo ""
+        echo "" >&2
         "$GUM" input --placeholder "Enter sender email (e.g., user@example.com)" --width 80
-    else
-        echo ""
     fi
+    # Return nothing (empty) if user chooses "No"
 }
 
 # Run import MBOX stage
