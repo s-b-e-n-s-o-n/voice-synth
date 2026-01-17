@@ -6,7 +6,7 @@
 
 set -e
 
-VERSION="0.2.1-alpha"
+VERSION="0.2.2-alpha"
 
 # Directory for isolated venv and cache
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/voice-synth"
@@ -319,7 +319,7 @@ pick_file() {
     # All display output goes to stderr so only the path goes to stdout
     center "$("$GUM" style --foreground 245 "$prompt")" >&2
     echo "" >&2
-    center "$("$GUM" style --foreground 245 --italic '👆 Drag from Finder into this window, then press Enter')" >&2
+    center "$("$GUM" style --foreground 245 --italic '👇 Drag from Finder into this window, then press Enter')" >&2
 
     local raw_path
     raw_path=$("$GUM" input --placeholder "Drop file here..." --width 80)
