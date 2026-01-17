@@ -25,8 +25,7 @@ Your emails from Google Takeout:
 
 1. Go to [takeout.google.com](https://takeout.google.com)
 2. Click "Deselect all", then select only **Mail**
-3. Choose **50 GB** file size (avoids splitting)
-4. Download the `.mbox` file
+3. Download (any file size works - we handle split exports)
 
 ## What It Does
 
