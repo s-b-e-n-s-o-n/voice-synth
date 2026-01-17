@@ -6,7 +6,7 @@
 
 set -e
 
-VERSION="0.1.6-alpha"
+VERSION="0.1.7-alpha"
 
 # Directory for isolated venv and cache
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/voice-synth"
@@ -329,7 +329,7 @@ pick_file() {
     local method
     method=$("$GUM" choose \
         "${pad}Browse files" \
-        "${pad}Paste or type path")
+        "${pad}Drag & drop or paste path")
     method="${method#"$pad"}"
 
     echo "" >&2
@@ -342,7 +342,7 @@ pick_file() {
         "$GUM" file --file --all --height 20 "$browse_dir"
     else
         # Manual path entry mode
-        center "$("$GUM" style --foreground 245 --italic 'Paste or type the full file path:')" >&2
+        center "$("$GUM" style --foreground 245 --italic 'Drag file here, paste path, or type it:')" >&2
         local raw_path
         raw_path=$("$GUM" input --placeholder "/path/to/file..." --width 80)
 
