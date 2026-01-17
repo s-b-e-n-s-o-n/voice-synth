@@ -6,7 +6,7 @@
 
 set -e
 
-VERSION="0.2.504-alpha"
+VERSION="0.2.505-alpha"
 
 # Graceful exit handler
 graceful_exit() {

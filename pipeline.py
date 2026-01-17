@@ -187,8 +187,8 @@ def import_mbox_single(
             labels = message.get("X-Gmail-Labels", "")
             label_list = [l.strip().lower() for l in labels.split(",")]
 
-            # Skip spam and trash
-            if "spam" in label_list or "trash" in label_list:
+            # Skip spam, trash, and drafts
+            if "spam" in label_list or "trash" in label_list or "draft" in label_list or "drafts" in label_list:
                 spam_trash += 1
                 continue
 
@@ -309,7 +309,7 @@ def import_mbox(
         if not quiet:
             msg = f"      ✓ {stats['imported']} emails imported"
             if stats["spam_trash"] > 0:
-                msg += f" (🗑️ {stats['spam_trash']} spam/trash filtered)"
+                msg += f" (🗑️ {stats['spam_trash']} spam/trash/drafts filtered)"
             print(msg)
 
     if not quiet:
@@ -319,7 +319,7 @@ def import_mbox(
         else:
             print(f"📊 TOTAL: {total_stats['imported']} emails")
         if total_stats["spam_trash"] > 0:
-            print(f"🗑️ Filtered: {total_stats['spam_trash']} spam/trash messages")
+            print(f"🗑️ Filtered: {total_stats['spam_trash']} spam/trash/drafts")
         print(f"💾 Saving to: {output_path}")
 
     with open(output_path, "w", encoding="utf-8") as f:
