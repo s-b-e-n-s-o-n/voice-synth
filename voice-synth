@@ -6,7 +6,7 @@
 
 set -e
 
-VERSION="0.2.2-alpha"
+VERSION="0.2.3-alpha"
 
 # Directory for isolated venv and cache
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/voice-synth"
@@ -348,6 +348,11 @@ pick_file() {
 get_sender() {
     local mbox_file="$1"
     local detected_email=""
+
+    # Clear screen for fresh start
+    show_header >&2
+    center "$("$GUM" style --foreground 99 --bold 'Sender Filter')" >&2
+    echo "" >&2
 
     # Try to auto-detect owner email from mbox
     if [ -n "$mbox_file" ] && [ -f "$mbox_file" ]; then
