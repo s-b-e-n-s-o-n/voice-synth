@@ -6,7 +6,7 @@
 
 set -e
 
-VERSION="0.1.2-alpha"
+VERSION="0.1.3-alpha"
 
 # Directory for isolated venv and cache
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/voice-synth"
@@ -311,10 +311,11 @@ setup_deps() {
     sleep 1
 }
 
-# File picker with drag-and-drop support
+# File picker with multiple selection methods
 pick_file() {
     local prompt="$1"
     local pattern="${2:-*.json}"
+    local start_dir="${3:-$HOME/Downloads}"
 
     center "$("$GUM" style --foreground 245 "$prompt")"
     echo ""
@@ -325,39 +326,38 @@ pick_file() {
     # Ask how they want to select
     local method
     method=$("$GUM" choose \
-        "${pad}Drag & drop file here (or paste path)" \
-        "${pad}Browse for file")
+        "${pad}Browse files" \
+        "${pad}Paste or type path")
     method="${method#"$pad"}"
 
     echo ""
 
-    if [[ "$method" == "Drag"* ]]; then
-        # Drag and drop / paste path mode
-        center "$("$GUM" style --foreground 245 --italic 'Drag file here or paste path, then press Enter:')"
-        local path
-        path=$("$GUM" input --placeholder "Drop file here..." --width 80)
-        # Clean up path (remove quotes, escaped spaces, trailing spaces)
-        path="${path//\'/}"
-        path="${path//\"/}"
-        # Handle escaped spaces from drag-and-drop (backslash followed by space)
-        path=$(printf '%s' "$path" | sed 's/\\ / /g')
-        # Trim leading/trailing whitespace
-        path="${path#"${path%%[![:space:]]*}"}"
-        path="${path%"${path##*[![:space:]]}"}"
-        echo "$path"
+    if [[ "$method" == "Browse"* ]]; then
+        # Use gum file picker - starts in Downloads by default
+        center "$("$GUM" style --foreground 245 --italic 'Navigate to your file and press Enter:')"
+        "$GUM" file "$start_dir" --height 15
     else
-        # Browse mode - search home directory and Downloads
-        local files
-        files=$(find ~ ~/Downloads ~/Desktop -maxdepth 3 -name "$pattern" -type f 2>/dev/null | head -30)
+        # Manual path entry mode
+        center "$("$GUM" style --foreground 245 --italic 'Paste or type the full file path:')"
+        local raw_path
+        raw_path=$("$GUM" input --placeholder "/path/to/file..." --width 80)
 
-        if [ -n "$files" ]; then
-            printf '%s' "$pad"
-            echo "$files" | "$GUM" filter --placeholder "Type to search..."
-        else
-            center "$("$GUM" style --foreground 214 "No $pattern files found.")"
-            center "$("$GUM" style --foreground 245 --italic 'Enter path manually:')"
-            "$GUM" input --placeholder "Enter file path..." --width 80
-        fi
+        # Clean up path from drag-and-drop or copy-paste
+        # Remove surrounding quotes if present
+        raw_path="${raw_path#\'}"
+        raw_path="${raw_path%\'}"
+        raw_path="${raw_path#\"}"
+        raw_path="${raw_path%\"}"
+
+        # Use eval to interpret escaped sequences (handles \  for spaces)
+        local clean_path
+        clean_path=$(eval echo "$raw_path" 2>/dev/null) || clean_path="$raw_path"
+
+        # Trim whitespace
+        clean_path="${clean_path#"${clean_path%%[![:space:]]*}"}"
+        clean_path="${clean_path%"${clean_path##*[![:space:]]}"}"
+
+        echo "$clean_path"
     fi
 }
 
