@@ -6,7 +6,23 @@
 
 set -e
 
-VERSION="0.2.502-alpha"
+VERSION="0.2.503-alpha"
+
+# Graceful exit handler
+graceful_exit() {
+    echo ""
+    echo ""
+    if command -v gum &>/dev/null || [ -x "$GUM" ]; then
+        center "$("${GUM:-gum}" style --foreground 245 '👋 Goodbye!')"
+    else
+        echo "  👋 Goodbye!"
+    fi
+    echo ""
+    exit 0
+}
+
+# Trap Ctrl+C
+trap graceful_exit INT TERM
 
 # Directory for isolated venv and cache
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/voice-synth"
@@ -322,7 +338,7 @@ pick_file() {
     center "$("$GUM" style --foreground 245 --italic '👇 Drag from Finder into this window, then press Enter')" >&2
 
     local raw_path
-    raw_path=$("$GUM" input --placeholder "Drop file here..." --width 80)
+    raw_path=$("$GUM" input --placeholder "Drop file here..." --width 80) || graceful_exit
 
     # Clean up path from drag-and-drop or copy-paste
     # Remove surrounding quotes if present
@@ -375,14 +391,14 @@ get_sender() {
         choice=$("$GUM" choose \
             "${pad}Yes, use $detected_email" \
             "${pad}No, enter a different email" \
-            "${pad}No, keep all senders")
+            "${pad}No, keep all senders") || graceful_exit
         choice="${choice#"$pad"}"
 
         if [[ "$choice" == "Yes"* ]]; then
             echo "$detected_email"
         elif [[ "$choice" == "No, enter"* ]]; then
             echo "" >&2
-            "$GUM" input --placeholder "Enter sender email" --value "$detected_email" --width 80
+            "$GUM" input --placeholder "Enter sender email" --value "$detected_email" --width 80 || graceful_exit
         fi
         # Return nothing if "keep all senders"
     else
@@ -391,12 +407,12 @@ get_sender() {
         echo "" >&2
 
         local choice
-        choice=$("$GUM" choose "${pad}Yes, filter by sender" "${pad}No, keep all senders")
+        choice=$("$GUM" choose "${pad}Yes, filter by sender" "${pad}No, keep all senders") || graceful_exit
         choice="${choice#"$pad"}"
 
         if [[ "$choice" == "Yes"* ]]; then
             echo "" >&2
-            "$GUM" input --placeholder "Enter sender email (e.g., user@example.com)" --width 80
+            "$GUM" input --placeholder "Enter sender email (e.g., user@example.com)" --width 80 || graceful_exit
         fi
     fi
 }
@@ -1026,7 +1042,7 @@ main_menu() {
         menu_options+=("${padding}Quit")
 
         local choice
-        choice=$("$GUM" choose "${menu_options[@]}")
+        choice=$("$GUM" choose "${menu_options[@]}") || graceful_exit
         # Strip padding from result
         choice="${choice#"$padding"}"
 
