@@ -316,41 +316,27 @@ def import_mbox(
     return total_stats
 
 
-def detect_owner_email(input_path: str, sample_size: int = 200) -> Optional[str]:
+def detect_owner_email(input_path: str, sample_size: int = 50) -> Optional[str]:
     """
-    Detect the likely owner email from an mbox file by finding the most common sender.
-    Skips common group/shared email addresses.
+    Detect the mailbox owner's email from an mbox file.
+
+    Uses the "Delivered-To" header which Gmail sets to indicate the actual
+    mailbox recipient - much more reliable than looking at From addresses.
 
     Args:
         input_path: Path to mbox file
         sample_size: Number of messages to sample
 
     Returns:
-        Most common personal email address, or None if not detected
+        Owner's email address, or None if not detected
     """
     from collections import Counter
-
-    # Common group/shared email prefixes to skip
-    GROUP_PREFIXES = {
-        'it', 'support', 'help', 'info', 'admin', 'hr', 'sales', 'marketing',
-        'noreply', 'no-reply', 'donotreply', 'do-not-reply', 'team', 'hello',
-        'contact', 'billing', 'accounts', 'finance', 'office', 'ops',
-        'operations', 'service', 'services', 'notifications', 'alerts',
-        'system', 'mailer', 'postmaster', 'webmaster', 'abuse', 'security',
-        'legal', 'compliance', 'press', 'media', 'news', 'newsletter',
-        'feedback', 'enquiries', 'inquiries', 'general', 'all', 'everyone',
-    }
-
-    def is_group_email(email: str) -> bool:
-        """Check if email looks like a group/shared address."""
-        local_part = email.split('@')[0].lower()
-        return local_part in GROUP_PREFIXES
 
     mbox_files = find_mbox_files(input_path, quiet=True)
     if not mbox_files:
         return None
 
-    sender_counts: Counter = Counter()
+    delivered_to_counts: Counter = Counter()
 
     for mbox_path in mbox_files:
         try:
@@ -361,23 +347,23 @@ def detect_owner_email(input_path: str, sample_size: int = 200) -> Optional[str]
                 if count >= sample_size:
                     break
 
-                from_addr = message.get("From", "")
-                if from_addr:
-                    # Parse email address from "Name <email>" format
-                    _, email = parseaddr(from_addr)
-                    if email and not is_group_email(email):
-                        sender_counts[email.lower()] += 1
+                # Delivered-To header shows the actual mailbox owner
+                delivered_to = message.get("Delivered-To", "")
+                if delivered_to:
+                    _, email = parseaddr(delivered_to)
+                    if email:
+                        delivered_to_counts[email.lower()] += 1
                 count += 1
 
             mbox.close()
         except Exception:
             continue
 
-    if not sender_counts:
+    if not delivered_to_counts:
         return None
 
-    # Return the most common non-group sender
-    most_common = sender_counts.most_common(1)
+    # Return the most common Delivered-To address (should be consistent)
+    most_common = delivered_to_counts.most_common(1)
     return most_common[0][0] if most_common else None
 
 
