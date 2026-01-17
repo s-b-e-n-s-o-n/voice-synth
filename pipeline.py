@@ -174,6 +174,7 @@ def import_mbox_single(
     emails = []
     total = 0
     skipped = 0
+    spam_trash = 0
 
     for message in mbox:
         total += 1
@@ -182,6 +183,15 @@ def import_mbox_single(
             print(f"      Processed {total} messages...")
 
         try:
+            # Gmail-specific: get labels early to filter spam/trash
+            labels = message.get("X-Gmail-Labels", "")
+            label_list = [l.strip().lower() for l in labels.split(",")]
+
+            # Skip spam and trash
+            if "spam" in label_list or "trash" in label_list:
+                spam_trash += 1
+                continue
+
             # Extract headers
             msg_id = message.get("Message-ID", "")
             from_addr = message.get("From", "")
@@ -189,9 +199,6 @@ def import_mbox_single(
             cc_addr = message.get("Cc", "")
             subject = message.get("Subject", "")
             date = message.get("Date", "")
-
-            # Gmail-specific: get labels
-            labels = message.get("X-Gmail-Labels", "")
 
             # Extract body (skipping attachments)
             plain_body, html_body = extract_body_from_message(message)
@@ -222,7 +229,7 @@ def import_mbox_single(
 
     mbox.close()
 
-    return emails, {"total": total, "imported": len(emails), "skipped": skipped}
+    return emails, {"total": total, "imported": len(emails), "skipped": skipped, "spam_trash": spam_trash}
 
 
 def import_mbox(
@@ -281,7 +288,7 @@ def import_mbox(
 
     # Import all MBOX files
     all_emails = []
-    total_stats = {"total": 0, "imported": 0, "skipped": 0, "files": len(mbox_files)}
+    total_stats = {"total": 0, "imported": 0, "skipped": 0, "spam_trash": 0, "files": len(mbox_files)}
 
     for i, mbox_path in enumerate(mbox_files, 1):
         if not quiet:
@@ -297,9 +304,13 @@ def import_mbox(
         total_stats["total"] += stats["total"]
         total_stats["imported"] += stats["imported"]
         total_stats["skipped"] += stats["skipped"]
+        total_stats["spam_trash"] += stats["spam_trash"]
 
         if not quiet:
-            print(f"      ✓ {stats['imported']} emails imported")
+            msg = f"      ✓ {stats['imported']} emails imported"
+            if stats["spam_trash"] > 0:
+                msg += f" (🗑️ {stats['spam_trash']} spam/trash filtered)"
+            print(msg)
 
     if not quiet:
         print(f"\n{'─'*60}")
@@ -307,6 +318,8 @@ def import_mbox(
             print(f"📊 TOTAL: {total_stats['imported']} emails from {len(mbox_files)} files")
         else:
             print(f"📊 TOTAL: {total_stats['imported']} emails")
+        if total_stats["spam_trash"] > 0:
+            print(f"🗑️ Filtered: {total_stats['spam_trash']} spam/trash messages")
         print(f"💾 Saving to: {output_path}")
 
     with open(output_path, "w", encoding="utf-8") as f:
