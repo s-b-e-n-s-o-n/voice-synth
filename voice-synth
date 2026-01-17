@@ -6,7 +6,7 @@
 
 set -e
 
-VERSION="0.1.5-alpha"
+VERSION="0.1.6-alpha"
 
 # Directory for isolated venv and cache
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/voice-synth"
@@ -339,7 +339,7 @@ pick_file() {
         center "$("$GUM" style --foreground 245 --italic 'Navigate to your file and press Enter:')" >&2
         local browse_dir="$start_dir"
         [ -d "$browse_dir" ] || browse_dir="$HOME"
-        "$GUM" file --file --height 15 "$browse_dir"
+        "$GUM" file --file --all --height 20 "$browse_dir"
     else
         # Manual path entry mode
         center "$("$GUM" style --foreground 245 --italic 'Paste or type the full file path:')" >&2
