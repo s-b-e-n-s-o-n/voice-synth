@@ -6,6 +6,8 @@
 
 set -e
 
+VERSION="0.1.0-alpha"
+
 # Directory for isolated venv and cache
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/voice-synth"
 VENV_DIR="$CACHE_DIR/venv"
@@ -240,7 +242,8 @@ show_header() {
         --align center \
         --width "$WIDTH" \
         "$("$GUM" style --foreground 99 --bold 'Voice Synthesizer')" \
-        "$("$GUM" style --foreground 245 'Email data preparation for GPT fine-tuning')"
+        "$("$GUM" style --foreground 245 'Email data preparation for GPT fine-tuning')" \
+        "$("$GUM" style --foreground 240 "v$VERSION")"
     echo ""
 }
 
@@ -334,29 +337,25 @@ pick_file() {
         local path
         printf '%s' "$pad"
         path=$("$GUM" input --placeholder "Drop file here...")
-        # DEBUG
-        echo "DEBUG raw: [$path]" >&2
         # Clean up path (remove quotes, escaped spaces, trailing spaces)
         path="${path//\'/}"
         path="${path//\"/}"
         # Handle escaped spaces from drag-and-drop (backslash followed by space)
         path=$(printf '%s' "$path" | sed 's/\\ / /g')
-        echo "DEBUG cleaned: [$path]" >&2
         # Trim leading/trailing whitespace
         path="${path#"${path%%[![:space:]]*}"}"
         path="${path%"${path##*[![:space:]]}"}"
-        echo "DEBUG final: [$path]" >&2
         echo "$path"
     else
-        # Browse mode - find matching files
+        # Browse mode - search home directory and Downloads
         local files
-        files=$(find . -maxdepth 3 -name "$pattern" -type f 2>/dev/null | head -30)
+        files=$(find ~ ~/Downloads ~/Desktop -maxdepth 3 -name "$pattern" -type f 2>/dev/null | head -30)
 
         if [ -n "$files" ]; then
             printf '%s' "$pad"
-            echo "$files" | "$GUM" filter --placeholder "Type to search..." --width 60
+            echo "$files" | "$GUM" filter --placeholder "Type to search..."
         else
-            center "$("$GUM" style --foreground 214 "No $pattern files found in current directory.")"
+            center "$("$GUM" style --foreground 214 "No $pattern files found.")"
             center "$("$GUM" style --foreground 245 --italic 'Enter path manually:')"
             printf '%s' "$pad"
             "$GUM" input --placeholder "Enter file path..."
