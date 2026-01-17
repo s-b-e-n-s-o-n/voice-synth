@@ -334,14 +334,18 @@ pick_file() {
         local path
         printf '%s' "$pad"
         path=$("$GUM" input --placeholder "Drop file here...")
+        # DEBUG
+        echo "DEBUG raw: [$path]" >&2
         # Clean up path (remove quotes, escaped spaces, trailing spaces)
         path="${path//\'/}"
         path="${path//\"/}"
         # Handle escaped spaces from drag-and-drop (backslash followed by space)
         path=$(printf '%s' "$path" | sed 's/\\ / /g')
+        echo "DEBUG cleaned: [$path]" >&2
         # Trim leading/trailing whitespace
         path="${path#"${path%%[![:space:]]*}"}"
         path="${path%"${path##*[![:space:]]}"}"
+        echo "DEBUG final: [$path]" >&2
         echo "$path"
     else
         # Browse mode - find matching files
