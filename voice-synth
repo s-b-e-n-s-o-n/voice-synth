@@ -6,7 +6,7 @@
 
 set -e
 
-VERSION="0.1.9-alpha"
+VERSION="0.2.0-alpha"
 
 # Directory for isolated venv and cache
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/voice-synth"
@@ -311,58 +311,35 @@ setup_deps() {
     sleep 1
 }
 
-# File picker with multiple selection methods
+# File picker - drag and drop from Finder
 # Returns selected file path to stdout, displays UI to stderr
 pick_file() {
     local prompt="$1"
-    local pattern="${2:-*.json}"
-    local start_dir="${3:-$HOME/Downloads}"
 
     # All display output goes to stderr so only the path goes to stdout
     center "$("$GUM" style --foreground 245 "$prompt")" >&2
     echo "" >&2
+    center "$("$GUM" style --foreground 245 --italic 'Drag file from Finder into this window, then press Enter:')" >&2
 
-    local pad
-    pad=$(get_padding $ITEM_WIDTH)
+    local raw_path
+    raw_path=$("$GUM" input --placeholder "Drop file here..." --width 80)
 
-    # Ask how they want to select
-    local method
-    method=$("$GUM" choose \
-        "${pad}Browse files" \
-        "${pad}Drag & drop or paste path")
-    method="${method#"$pad"}"
+    # Clean up path from drag-and-drop or copy-paste
+    # Remove surrounding quotes if present
+    raw_path="${raw_path#\'}"
+    raw_path="${raw_path%\'}"
+    raw_path="${raw_path#\"}"
+    raw_path="${raw_path%\"}"
 
-    echo "" >&2
+    # Use eval to interpret escaped sequences (handles \  for spaces)
+    local clean_path
+    clean_path=$(eval echo "$raw_path" 2>/dev/null) || clean_path="$raw_path"
 
-    if [[ "$method" == "Browse"* ]]; then
-        # Use gum file picker - starts in Downloads by default
-        center "$("$GUM" style --foreground 245 --italic 'Navigate to your file and press Enter:')" >&2
-        local browse_dir="$start_dir"
-        [ -d "$browse_dir" ] || browse_dir="$HOME"
-        "$GUM" file --file --no-permissions --height 20 "$browse_dir"
-    else
-        # Manual path entry mode
-        center "$("$GUM" style --foreground 245 --italic 'Drag file here, paste path, or type it:')" >&2
-        local raw_path
-        raw_path=$("$GUM" input --placeholder "/path/to/file..." --width 80)
+    # Trim whitespace
+    clean_path="${clean_path#"${clean_path%%[![:space:]]*}"}"
+    clean_path="${clean_path%"${clean_path##*[![:space:]]}"}"
 
-        # Clean up path from drag-and-drop or copy-paste
-        # Remove surrounding quotes if present
-        raw_path="${raw_path#\'}"
-        raw_path="${raw_path%\'}"
-        raw_path="${raw_path#\"}"
-        raw_path="${raw_path%\"}"
-
-        # Use eval to interpret escaped sequences (handles \  for spaces)
-        local clean_path
-        clean_path=$(eval echo "$raw_path" 2>/dev/null) || clean_path="$raw_path"
-
-        # Trim whitespace
-        clean_path="${clean_path#"${clean_path%%[![:space:]]*}"}"
-        clean_path="${clean_path%"${clean_path##*[![:space:]]}"}"
-
-        echo "$clean_path"
-    fi
+    echo "$clean_path"
 }
 
 # Get sender email with auto-detection
