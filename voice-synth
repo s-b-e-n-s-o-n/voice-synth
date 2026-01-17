@@ -6,7 +6,7 @@
 
 set -e
 
-VERSION="0.1.7-alpha"
+VERSION="0.1.8-alpha"
 
 # Directory for isolated venv and cache
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/voice-synth"
@@ -365,24 +365,58 @@ pick_file() {
     fi
 }
 
-# Get sender email
+# Get sender email with auto-detection
+# Args: $1 = mbox file path (optional, for auto-detection)
 # Returns sender email to stdout, displays UI to stderr
 get_sender() {
-    center "$("$GUM" style --foreground 245 'Filter to emails from a specific sender?')" >&2
-    echo "" >&2
+    local mbox_file="$1"
+    local detected_email=""
+
+    # Try to auto-detect owner email from mbox
+    if [ -n "$mbox_file" ] && [ -f "$mbox_file" ]; then
+        center "$("$GUM" style --foreground 245 'Detecting your email address...')" >&2
+        detected_email=$("$PYTHON" pipeline.py detect-owner "$mbox_file" 2>/dev/null) || detected_email=""
+    fi
 
     local pad
     pad=$(get_padding $ITEM_WIDTH)
 
-    local choice
-    choice=$("$GUM" choose "${pad}Yes, filter by sender" "${pad}No, keep all senders")
-    choice="${choice#"$pad"}"
-
-    if [[ "$choice" == "Yes"* ]]; then
+    if [ -n "$detected_email" ]; then
+        # Found email - ask for confirmation
         echo "" >&2
-        "$GUM" input --placeholder "Enter sender email (e.g., user@example.com)" --width 80
+        center "$("$GUM" style --foreground 82 "Detected: $detected_email")" >&2
+        echo "" >&2
+        center "$("$GUM" style --foreground 245 'Filter to emails from this sender?')" >&2
+        echo "" >&2
+
+        local choice
+        choice=$("$GUM" choose \
+            "${pad}Yes, use $detected_email" \
+            "${pad}No, enter a different email" \
+            "${pad}No, keep all senders")
+        choice="${choice#"$pad"}"
+
+        if [[ "$choice" == "Yes"* ]]; then
+            echo "$detected_email"
+        elif [[ "$choice" == "No, enter"* ]]; then
+            echo "" >&2
+            "$GUM" input --placeholder "Enter sender email" --value "$detected_email" --width 80
+        fi
+        # Return nothing if "keep all senders"
+    else
+        # No detection - ask manually
+        center "$("$GUM" style --foreground 245 'Filter to emails from a specific sender?')" >&2
+        echo "" >&2
+
+        local choice
+        choice=$("$GUM" choose "${pad}Yes, filter by sender" "${pad}No, keep all senders")
+        choice="${choice#"$pad"}"
+
+        if [[ "$choice" == "Yes"* ]]; then
+            echo "" >&2
+            "$GUM" input --placeholder "Enter sender email (e.g., user@example.com)" --width 80
+        fi
     fi
-    # Return nothing (empty) if user chooses "No"
 }
 
 # Run import MBOX stage
@@ -472,7 +506,7 @@ run_clean() {
     fi
 
     local sender
-    sender=$(get_sender)
+    sender=$(get_sender "$input_file")
 
     local sender_arg=""
     if [ -n "$sender" ]; then
@@ -553,7 +587,7 @@ run_full_pipeline() {
     fi
 
     local sender
-    sender=$(get_sender)
+    sender=$(get_sender "$input_file")
 
     local sender_arg=""
     if [ -n "$sender" ]; then
@@ -624,7 +658,7 @@ run_full_pipeline_advanced() {
     center "$("$GUM" style --foreground 245 'only emails that YOU wrote (not received).')"
     echo ""
     local sender
-    sender=$(get_sender)
+    sender=$(get_sender "$input_file")
 
     local sender_arg=""
     if [ -n "$sender" ]; then
@@ -908,7 +942,7 @@ run_resume() {
     local sender=""
     local sender_arg=""
     if [ "$start_stage" = "clean" ]; then
-        sender=$(get_sender)
+        sender=$(get_sender "$input_file")
         if [ -n "$sender" ]; then
             sender_arg="--sender $sender"
         fi
@@ -921,7 +955,7 @@ run_resume() {
     case "$start_stage" in
         "convert")
             "$PYTHON" pipeline.py convert "$input_file" --out emails.jsonl
-            sender=$(get_sender)
+            sender=$(get_sender "$input_file")
             if [ -n "$sender" ]; then
                 sender_arg="--sender $sender"
             fi

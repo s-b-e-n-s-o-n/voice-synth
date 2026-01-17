@@ -316,6 +316,54 @@ def import_mbox(
     return total_stats
 
 
+def detect_owner_email(input_path: str, sample_size: int = 200) -> Optional[str]:
+    """
+    Detect the likely owner email from an mbox file by finding the most common sender.
+
+    Args:
+        input_path: Path to mbox file
+        sample_size: Number of messages to sample
+
+    Returns:
+        Most common email address, or None if not detected
+    """
+    from collections import Counter
+
+    mbox_files = find_mbox_files(input_path, quiet=True)
+    if not mbox_files:
+        return None
+
+    sender_counts: Counter = Counter()
+
+    for mbox_path in mbox_files:
+        try:
+            mbox = mailbox.mbox(mbox_path)
+            count = 0
+
+            for message in mbox:
+                if count >= sample_size:
+                    break
+
+                from_addr = message.get("From", "")
+                if from_addr:
+                    # Parse email address from "Name <email>" format
+                    _, email = parseaddr(from_addr)
+                    if email:
+                        sender_counts[email.lower()] += 1
+                count += 1
+
+            mbox.close()
+        except Exception:
+            continue
+
+    if not sender_counts:
+        return None
+
+    # Return the most common sender
+    most_common = sender_counts.most_common(1)
+    return most_common[0][0] if most_common else None
+
+
 # =============================================================================
 # STAGE 1: FORMAT CONVERSION
 # =============================================================================
@@ -1222,6 +1270,9 @@ def main():
     curate_parser.add_argument("--dedupe-threshold", type=float, default=0.8,
                                help="Similarity threshold for near-duplicate detection (0.0-1.0)")
 
+    detect_parser = subparsers.add_parser("detect-owner", help="Detect owner email from mbox")
+    detect_parser.add_argument("input", help="Input MBOX file or directory")
+
     args = parser.parse_args()
 
     if args.command == "run":
@@ -1282,6 +1333,13 @@ def main():
             d = results["deduplication"]
             print(f"Removed {d['removed']} duplicates ({d['exact_dupes']} exact, {d['near_dupes']} near)")
         print(f"Output: {results['output']}")
+
+    elif args.command == "detect-owner":
+        email = detect_owner_email(args.input)
+        if email:
+            print(email)
+        else:
+            sys.exit(1)
 
     else:
         parser.print_help()
