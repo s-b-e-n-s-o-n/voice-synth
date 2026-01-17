@@ -6,7 +6,7 @@
 
 set -e
 
-VERSION="0.2.5-alpha"
+VERSION="0.2.500-alpha"
 
 # Directory for isolated venv and cache
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/voice-synth"
