@@ -6,7 +6,7 @@
 
 set -e
 
-VERSION="0.1.0-alpha"
+VERSION="0.1.1-alpha"
 
 # Directory for isolated venv and cache
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/voice-synth"
@@ -335,8 +335,7 @@ pick_file() {
         # Drag and drop / paste path mode
         center "$("$GUM" style --foreground 245 --italic 'Drag file here or paste path, then press Enter:')"
         local path
-        printf '%s' "$pad"
-        path=$("$GUM" input --placeholder "Drop file here...")
+        path=$("$GUM" input --placeholder "Drop file here..." --width 80)
         # Clean up path (remove quotes, escaped spaces, trailing spaces)
         path="${path//\'/}"
         path="${path//\"/}"
