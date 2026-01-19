@@ -45,7 +45,7 @@ if ! command -v python3 &> /dev/null; then
 fi
 
 INSTALL_DIR="$HOME/voice-synth"
-BINARY_URL="https://github.com/s-b-e-n-s-o-n/voice-synth/releases/download/v0.5.1-alpha/voice-synth-tui"
+BINARY_URL="https://github.com/s-b-e-n-s-o-n/voice-synth/releases/download/v0.6.0/voice-synth-tui"
 PIPELINE_URL="https://raw.githubusercontent.com/s-b-e-n-s-o-n/voice-synth/main/pipeline.py"
 
 # Create install directory
