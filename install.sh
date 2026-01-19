@@ -61,8 +61,8 @@ curl -sL "$PIPELINE_URL" -o "$INSTALL_DIR/pipeline.py"
 echo -e "${GREEN}✓${RESET} Installed to ${DIM}$INSTALL_DIR${RESET}"
 echo ""
 
-# Launch
+# Launch with TTY reconnected (needed when running via curl | bash)
 echo -e "${DIM}Launching...${RESET}"
 echo ""
 cd "$INSTALL_DIR"
-exec ./voice-synth-tui
+exec ./voice-synth-tui < /dev/tty
