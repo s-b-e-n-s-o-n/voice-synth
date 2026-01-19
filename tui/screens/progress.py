@@ -54,11 +54,11 @@ class ProgressScreen(Screen):
         with Center():
             with Vertical(id="progress-container", classes="centered-content"):
                 yield Static(
-                    "[bold #9370DB]Processing Emails[/]",
+                    "[bold $primary]Processing Emails[/]",
                     classes="section-title"
                 )
                 yield Static(
-                    "[italic #8B8B8B]This may take a few minutes for large mailboxes[/]",
+                    "[italic dim]This may take a few minutes for large mailboxes[/]",
                     classes="section-subtitle"
                 )
                 yield StageTracker(id="stage-tracker")
@@ -234,7 +234,7 @@ class ProgressScreen(Screen):
     def _show_error(self, error: str) -> None:
         """Display error message."""
         detail = self.query_one("#progress-detail", Static)
-        detail.update(f"[#FF6B6B]Error: {error}[/]")
+        detail.update(f"[$error]Error: {error}[/]")
 
         btn = self.query_one("#btn-cancel", Button)
         btn.label = "Back"

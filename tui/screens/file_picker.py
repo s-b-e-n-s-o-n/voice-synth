@@ -59,7 +59,7 @@ class FilePickerScreen(Screen):
         with Center():
             with Vertical(id="picker-container", classes="centered-content"):
                 yield Static(
-                    "[bold #9370DB]Select Input File[/]",
+                    "[bold $primary]Select Input File[/]",
                     classes="section-title"
                 )
                 yield Static(
@@ -68,7 +68,7 @@ class FilePickerScreen(Screen):
                     classes="section-subtitle"
                 )
                 yield Static(
-                    "[italic #8B8B8B]Drag from Finder into this window, then press Enter[/]",
+                    "[italic dim]Drag from Finder into this window, then press Enter[/]",
                     classes="file-hint"
                 )
                 yield Input(
@@ -106,14 +106,14 @@ class FilePickerScreen(Screen):
 
         if exists:
             if os.path.isdir(path):
-                self._update_status(f"[#00FF7F]Directory: {path}[/]", valid=True)
+                self._update_status(f"[$success]Directory: {path}[/]", valid=True)
             elif path.lower().endswith(('.mbox', '.zip', '.json', '.jsonl')):
                 size_mb = os.path.getsize(path) / (1024 * 1024)
-                self._update_status(f"[#00FF7F]File: {os.path.basename(path)} ({size_mb:.1f} MB)[/]", valid=True)
+                self._update_status(f"[$success]File: {os.path.basename(path)} ({size_mb:.1f} MB)[/]", valid=True)
             else:
-                self._update_status(f"[#FFA500]Unsupported file type[/]", valid=False)
+                self._update_status(f"[$warning]Unsupported file type[/]", valid=False)
         else:
-            self._update_status(f"[#FF6B6B]File not found[/]", valid=False)
+            self._update_status(f"[$error]File not found[/]", valid=False)
 
     def _update_status(self, message: str, valid: bool | None) -> None:
         """Update status message and button state."""

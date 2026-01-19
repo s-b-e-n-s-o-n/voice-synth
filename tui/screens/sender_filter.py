@@ -30,7 +30,7 @@ class SenderFilterScreen(Screen):
         with Center():
             with Vertical(id="sender-container", classes="centered-content"):
                 yield Static(
-                    "[bold #9370DB]Sender Filter[/]",
+                    "[bold $primary]Sender Filter[/]",
                     classes="section-title"
                 )
                 yield Static(
@@ -38,7 +38,7 @@ class SenderFilterScreen(Screen):
                     classes="section-subtitle"
                 )
                 yield Static(
-                    "[#9370DB]Detecting your email address...[/]",
+                    "[$primary]Detecting your email address...[/]",
                     id="detection-status"
                 )
                 yield OptionList(id="sender-options")
@@ -90,7 +90,7 @@ class SenderFilterScreen(Screen):
     def _show_detected(self, email: str) -> None:
         """Show detected email with options."""
         status = self.query_one("#detection-status", Static)
-        status.update(f"[#00FF7F]Detected: {email}[/]")
+        status.update(f"[$success]Detected: {email}[/]")
 
         options = self.query_one("#sender-options", OptionList)
         options.clear_options()
@@ -106,7 +106,7 @@ class SenderFilterScreen(Screen):
     def _show_manual_entry(self) -> None:
         """Show manual email entry."""
         status = self.query_one("#detection-status", Static)
-        status.update("[#8B8B8B]Could not detect email. Enter manually or skip filter.[/]")
+        status.update("[dim]Could not detect email. Enter manually or skip filter.[/]")
 
         options = self.query_one("#sender-options", OptionList)
         options.clear_options()

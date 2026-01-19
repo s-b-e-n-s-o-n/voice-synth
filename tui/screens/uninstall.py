@@ -28,7 +28,7 @@ class UninstallScreen(Screen):
         with Center():
             with Vertical(id="uninstall-container", classes="modal-dialog"):
                 yield Static(
-                    "[bold #9370DB]Uninstall[/]",
+                    "[bold $primary]Uninstall[/]",
                     classes="modal-title"
                 )
                 yield Static(
@@ -36,7 +36,7 @@ class UninstallScreen(Screen):
                     classes="modal-body"
                 )
                 yield Static(
-                    f"[#8B8B8B italic]{cache_dir}[/]",
+                    f"[dim italic]{cache_dir}[/]",
                     classes="modal-body"
                 )
                 with Horizontal(classes="modal-buttons"):

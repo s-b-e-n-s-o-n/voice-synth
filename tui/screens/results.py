@@ -25,7 +25,7 @@ class ResultsScreen(Screen):
         with Center():
             with Vertical(id="results-container", classes="centered-content"):
                 yield Static(
-                    "[bold #00FF7F]Processing Complete![/]",
+                    "[bold $success]Processing Complete![/]",
                     classes="results-header"
                 )
                 yield Static(
@@ -35,7 +35,7 @@ class ResultsScreen(Screen):
                 )
                 yield DataTable(id="results-table")
                 yield Static(
-                    "[italic #8B8B8B]Open the CSV in a spreadsheet to review your emails[/]",
+                    "[italic dim]Open the CSV in a spreadsheet to review your emails[/]",
                     classes="section-subtitle"
                 )
                 yield Button(
@@ -63,7 +63,7 @@ class ResultsScreen(Screen):
             display_path = os.path.basename(desktop_path)
 
         path_widget = self.query_one("#output-path", Static)
-        path_widget.update(f"[#00FF7F]Output: {display_path}[/]")
+        path_widget.update(f"[$success]Output: {display_path}[/]")
 
         # Build results table
         table = self.query_one("#results-table", DataTable)
@@ -108,7 +108,7 @@ class ResultsScreen(Screen):
             table.add_row(
                 "[bold]Curate[/]",
                 f"{curate.get('total_input', 0):,}",
-                f"[bold #00FF7F]{curate.get('shortlisted', 0):,}[/]",
+                f"[bold $success]{curate.get('shortlisted', 0):,}[/]",
                 f"{filtered:,}"
             )
 

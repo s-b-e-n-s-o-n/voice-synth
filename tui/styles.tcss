@@ -1,8 +1,5 @@
 /* Voice Synthesizer TUI Styles
- * Primary: #9370DB (purple, gum fg=99)
- * Success: #00FF7F (green, gum fg=82)
- * Warning: #FFA500 (orange, gum fg=214)
- * Dim: #8B8B8B
+ * Uses textual-dark theme variables
  */
 
 /* Global */
@@ -16,23 +13,9 @@ BrandedHeader {
     height: auto;
     width: 100%;
     content-align: center middle;
-    border: double #9370DB;
-    padding: 1 2;
+    border: double $primary;
+    padding: 1 4;
     margin: 1 2;
-    background: $surface;
-}
-
-BrandedHeader .title {
-    text-style: bold;
-    color: #9370DB;
-}
-
-BrandedHeader .subtitle {
-    color: #8B8B8B;
-}
-
-BrandedHeader .version {
-    color: #5C5C5C;
 }
 
 /* Menu Buttons */
@@ -42,99 +25,52 @@ BrandedHeader .version {
     margin: 0 2 1 2;
     content-align: center middle;
     background: $surface;
-    border: solid #8B8B8B;
+    border: solid $primary-darken-2;
 }
 
 .menu-button:hover {
-    background: #2a2a2a;
-    border: solid #9370DB;
+    background: $primary-darken-3;
+    border: solid $primary;
 }
 
 .menu-button:focus {
-    background: #1a1a1a;
-    border: double #9370DB;
+    background: $primary-darken-2;
+    border: double $primary;
     text-style: bold;
 }
 
 .menu-button.-primary {
-    border: solid #9370DB;
-    color: #9370DB;
+    border: solid $primary;
+    color: $primary;
 }
 
 .menu-button.-primary:hover {
-    background: #2a2a2a;
-    border: double #9370DB;
+    background: $primary-darken-3;
+    border: double $primary;
 }
 
 .menu-button.-primary:focus {
-    background: #3a2a4a;
-    border: double #00FF7F;
-    color: #00FF7F;
+    background: $primary-darken-2;
+    border: double $secondary;
+    color: $secondary;
 }
 
 .menu-button.-resume {
-    border: solid #00FF7F;
-    color: #00FF7F;
+    border: solid $success;
+    color: $success;
 }
 
 .menu-button.-resume:focus {
-    background: #1a3a2a;
-    border: double #00FF7F;
+    background: $success-darken-3;
+    border: double $success;
 }
 
 /* Stage Tracker */
 StageTracker {
     height: auto;
     width: 100%;
-    padding: 1 2;
-}
-
-.stage-row {
-    height: 1;
-    layout: horizontal;
-}
-
-.stage-icon {
-    width: 3;
-    content-align: left middle;
-}
-
-.stage-icon.-pending {
-    color: #5C5C5C;
-}
-
-.stage-icon.-running {
-    color: #9370DB;
-}
-
-.stage-icon.-complete {
-    color: #00FF7F;
-}
-
-.stage-icon.-error {
-    color: #FF6B6B;
-}
-
-.stage-label {
-    width: 1fr;
-    content-align: left middle;
-}
-
-.stage-label.-pending {
-    color: #5C5C5C;
-}
-
-.stage-label.-running {
-    color: #FFFFFF;
-    text-style: bold;
-}
-
-.stage-label.-complete {
-    color: #8B8B8B;
-}
-
-.stage-label.-error {
-    color: #FF6B6B;
+    padding: 0 2;
+    margin: 1 0;
 }
 
 /* Progress Bar */
@@ -143,29 +79,29 @@ ProgressBar {
 }
 
 ProgressBar > .bar--bar {
-    color: #9370DB;
+    color: $primary;
 }
 
 ProgressBar > .bar--complete {
-    color: #00FF7F;
+    color: $success;
 }
 
 /* Input fields */
 Input {
     margin: 1 2;
-    border: solid #8B8B8B;
+    border: solid $primary-darken-2;
 }
 
 Input:focus {
-    border: solid #9370DB;
+    border: solid $primary;
 }
 
 Input.-valid {
-    border: solid #00FF7F;
+    border: solid $success;
 }
 
 Input.-invalid {
-    border: solid #FF6B6B;
+    border: solid $error;
 }
 
 /* File picker specific */
@@ -175,7 +111,7 @@ Input.-invalid {
 
 .file-hint {
     text-align: center;
-    color: #8B8B8B;
+    color: $text-muted;
     text-style: italic;
     margin: 0 2;
 }
@@ -183,32 +119,28 @@ Input.-invalid {
 /* Selection list */
 SelectionList {
     margin: 1 2;
-    border: solid #8B8B8B;
+    border: solid $primary-darken-2;
     height: auto;
     max-height: 12;
 }
 
 SelectionList:focus {
-    border: solid #9370DB;
-}
-
-SelectionList > .selection-list--option-highlighted {
-    background: #2a2a2a;
+    border: solid $primary;
 }
 
 /* Option list for menus */
 OptionList {
     margin: 1 2;
-    border: solid #8B8B8B;
+    border: solid $primary-darken-2;
     height: auto;
 }
 
 OptionList:focus {
-    border: solid #9370DB;
+    border: solid $primary;
 }
 
 OptionList > .option-list--option-highlighted {
-    background: #3a2a4a;
+    background: $primary-darken-3;
 }
 
 /* Data tables */
@@ -218,20 +150,15 @@ DataTable {
 }
 
 DataTable > .datatable--header {
-    color: #9370DB;
+    color: $primary;
     text-style: bold;
 }
 
 DataTable > .datatable--cursor {
-    background: #3a2a4a;
+    background: $primary-darken-3;
 }
 
 /* Help screen */
-.help-content {
-    padding: 1 2;
-    background: $surface;
-}
-
 MarkdownViewer {
     margin: 1 2;
 }
@@ -240,14 +167,9 @@ MarkdownViewer {
 .status-bar {
     dock: bottom;
     height: 1;
-    background: #1a1a1a;
-    color: #8B8B8B;
+    background: $panel;
+    color: $text-muted;
     padding: 0 2;
-}
-
-.status-bar .key {
-    color: #9370DB;
-    text-style: bold;
 }
 
 /* Modal dialogs */
@@ -255,7 +177,7 @@ MarkdownViewer {
     align: center middle;
     width: 60;
     height: auto;
-    border: double #9370DB;
+    border: double $primary;
     background: $surface;
     padding: 1 2;
 }
@@ -263,13 +185,12 @@ MarkdownViewer {
 .modal-dialog .modal-title {
     text-align: center;
     text-style: bold;
-    color: #9370DB;
+    color: $primary;
     margin-bottom: 1;
 }
 
 .modal-dialog .modal-body {
     text-align: center;
-    color: #FFFFFF;
     margin-bottom: 1;
 }
 
@@ -301,13 +222,13 @@ MarkdownViewer {
 .section-title {
     text-align: center;
     text-style: bold;
-    color: #9370DB;
+    color: $primary;
     margin: 1 0;
 }
 
 .section-subtitle {
     text-align: center;
-    color: #8B8B8B;
+    color: $text-muted;
     margin: 0 2 1 2;
 }
 
@@ -315,28 +236,28 @@ MarkdownViewer {
 .results-header {
     text-align: center;
     text-style: bold;
-    color: #00FF7F;
+    color: $success;
     margin: 1 0;
 }
 
 .results-path {
     text-align: center;
-    color: #00FF7F;
+    color: $success;
     margin: 0 2 1 2;
 }
 
 /* Loading indicator */
 .loading-indicator {
     text-align: center;
-    color: #9370DB;
+    color: $primary;
     margin: 2 0;
 }
 
 /* Error display */
 .error-message {
     text-align: center;
-    color: #FF6B6B;
+    color: $error;
     margin: 1 2;
     padding: 1;
-    border: solid #FF6B6B;
+    border: solid $error;
 }

@@ -93,25 +93,25 @@ class StageTracker(Static):
     def _get_icon(self, status: StageStatus) -> str:
         """Get status icon."""
         if status == StageStatus.PENDING:
-            return "[#5C5C5C]○[/]"
+            return "[dim]○[/]"
         elif status == StageStatus.RUNNING:
             frames = ["◐", "◓", "◑", "◒"]
-            return f"[#9370DB]{frames[self._spinner_frame % 4]}[/]"
+            return f"[$primary]{frames[self._spinner_frame % 4]}[/]"
         elif status == StageStatus.COMPLETE:
-            return "[#00FF7F]✓[/]"
+            return "[$success]✓[/]"
         else:  # ERROR
-            return "[#FF6B6B]✗[/]"
+            return "[$error]✗[/]"
 
     def _get_label_style(self, status: StageStatus) -> str:
         """Get label style for status."""
         if status == StageStatus.PENDING:
-            return "#5C5C5C"
+            return "dim"
         elif status == StageStatus.RUNNING:
-            return "bold white"
+            return "bold"
         elif status == StageStatus.COMPLETE:
-            return "#8B8B8B"
+            return "dim"
         else:  # ERROR
-            return "#FF6B6B"
+            return "$error"
 
     def _update_display(self) -> None:
         """Rebuild the stages display."""

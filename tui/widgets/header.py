@@ -27,8 +27,8 @@ class BrandedHeader(Static):
 
     def compose(self) -> ComposeResult:
         yield Static(
-            "[bold #9370DB]Voice Synthesizer[/]\n"
-            "[#8B8B8B]Email data preparation for GPT fine-tuning[/]\n"
-            f"[#5C5C5C]v{VERSION}[/]",
+            "[bold $primary]Voice Synthesizer[/]\n"
+            "[dim]Email data preparation for GPT fine-tuning[/]\n"
+            f"[dim italic]v{VERSION}[/]",
             classes="header-content"
         )

@@ -4,25 +4,8 @@ from pathlib import Path
 
 from textual.app import App
 from textual.binding import Binding
-from textual.theme import Theme
 
 from .screens.main_menu import MainMenuScreen
-
-
-# Custom theme matching Gum aesthetic
-VOICE_SYNTH_THEME = Theme(
-    name="voice-synth",
-    primary="#9370DB",      # Purple (gum fg=99)
-    secondary="#00FF7F",    # Green (gum fg=82)
-    accent="#FFA500",       # Orange (gum fg=214)
-    warning="#FFA500",
-    error="#FF6B6B",
-    success="#00FF7F",
-    foreground="#FFFFFF",
-    background="#1a1a1a",
-    surface="#0a0a0a",
-    panel="#1a1a1a",
-)
 
 
 class VoiceSynthApp(App):
@@ -47,9 +30,7 @@ class VoiceSynthApp(App):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        # Register custom theme
-        self.register_theme(VOICE_SYNTH_THEME)
-        self.theme = "voice-synth"
+        self.theme = "textual-dark"
 
     def on_mount(self) -> None:
         """Start with main menu screen."""
