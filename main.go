@@ -326,7 +326,12 @@ func (m model) handleEnter() (tea.Model, tea.Cmd) {
 		return m, detectOwnerEmail(path)
 
 	case screenSenderFilter:
-		m.sender = m.textInput.Value()
+		sender := strings.TrimSpace(m.textInput.Value())
+		if sender == "" {
+			m.errMsg = "Email address is required"
+			return m, nil
+		}
+		m.sender = sender
 		m.workDir, _ = os.Getwd()
 		m.screen = screenProgress
 		m.currentStage = stageImport
@@ -441,8 +446,7 @@ func (m model) viewSenderFilter() string {
 	content := titleStyle.Render("Sender Filter") + "\n"
 	content += subtitleStyle.Render("Filter to emails you wrote (not received)") + "\n\n"
 	content += dimStyle.Render(m.statusMsg) + "\n\n"
-	content += m.textInput.View() + "\n\n"
-	content += dimStyle.Render("Leave empty to keep all senders") + "\n"
+	content += m.textInput.View() + "\n"
 
 	if m.errMsg != "" {
 		content += "\n" + errorStyle.Render(m.errMsg)
