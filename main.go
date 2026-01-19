@@ -183,13 +183,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		// On screens with text input, let textInput handle most keys
-		if m.screen == screenFilePicker || m.screen == screenSenderFilter {
+		if m.screen == screenFilePicker || m.screen == screenSenderFilter || m.screen == screenUninstall {
 			switch msg.String() {
 			case "ctrl+c":
 				return m, tea.Quit
 			case "esc":
 				m.screen = screenMainMenu
 				m.errMsg = ""
+				m.textInput.SetValue("")
 				return m, nil
 			case "enter":
 				return m.handleEnter()
@@ -307,6 +308,10 @@ func (m model) handleEnter() (tea.Model, tea.Cmd) {
 			m.screen = screenHelp
 		case "Uninstall":
 			m.screen = screenUninstall
+			m.textInput.SetValue("")
+			m.textInput.Placeholder = "Type 'uninstall' here..."
+			m.textInput.Focus()
+			m.errMsg = ""
 		case "Quit":
 			return m, tea.Quit
 		}
@@ -345,8 +350,26 @@ func (m model) handleEnter() (tea.Model, tea.Cmd) {
 			runPipelineStage(m.inputFile, m.sender, m.workDir, stageImport),
 		)
 
-	case screenResults, screenHelp, screenUninstall:
+	case screenResults, screenHelp:
 		m.screen = screenMainMenu
+
+	case screenUninstall:
+		if strings.ToLower(strings.TrimSpace(m.textInput.Value())) == "uninstall" {
+			// Do the uninstall
+			cacheDir := getCacheDir()
+			homeDir, _ := os.UserHomeDir()
+			installDir := filepath.Join(homeDir, "voice-synth")
+
+			os.RemoveAll(cacheDir)
+			os.RemoveAll(installDir)
+
+			fmt.Println("\n  Uninstalled successfully.")
+			fmt.Println("  Run the install command again to reinstall.\n")
+			return m, tea.Quit
+		} else {
+			m.errMsg = "Type 'uninstall' to confirm"
+			return m, nil
+		}
 	}
 
 	return m, nil
@@ -587,8 +610,16 @@ func (m model) viewHelp() string {
 func (m model) viewUninstall() string {
 	content := titleStyle.Render("Uninstall") + "\n\n"
 	content += "This will delete:\n"
-	content += dimStyle.Render("~/.cache/voice-synth/") + "\n\n"
-	content += dimStyle.Render("Press 'y' to confirm, any other key to cancel")
+	content += dimStyle.Render("~/.cache/voice-synth/") + "\n"
+	content += dimStyle.Render("~/voice-synth/") + "\n\n"
+	content += "Type " + errorStyle.Render("uninstall") + " to confirm:\n\n"
+	content += m.textInput.View() + "\n"
+
+	if m.errMsg != "" {
+		content += "\n" + errorStyle.Render(m.errMsg)
+	}
+
+	content += "\n" + dimStyle.Render("enter confirm • esc cancel")
 
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
 		menuStyle.Render(content))
