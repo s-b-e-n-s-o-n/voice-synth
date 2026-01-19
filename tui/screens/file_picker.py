@@ -3,6 +3,7 @@
 import os
 import re
 from pathlib import Path
+from typing import Optional
 
 from textual.app import ComposeResult
 from textual.containers import Center, Vertical
@@ -115,7 +116,7 @@ class FilePickerScreen(Screen):
         else:
             self._update_status(f"[$error]File not found[/]", valid=False)
 
-    def _update_status(self, message: str, valid: bool | None) -> None:
+    def _update_status(self, message: str, valid: Optional[bool]) -> None:
         """Update status message and button state."""
         status = self.query_one("#file-status", Static)
         status.update(message)
