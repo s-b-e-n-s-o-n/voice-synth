@@ -21,8 +21,9 @@ class VoiceSynthApp(App):
         Binding("?", "help", "Help", show=True),
     ]
 
-    # Disable mouse support to avoid escape code issues
+    # Disable features that cause terminal escape code issues
     ENABLE_COMMAND_PALETTE = False
+    MOUSE_SUPPORT = False
 
     # Pipeline state - shared across screens
     input_file: str = ""
