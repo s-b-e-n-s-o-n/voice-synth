@@ -21,7 +21,7 @@ import mailbox
 import os
 import re
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from email import policy
 from email.utils import getaddresses, parseaddr
 from pathlib import Path
@@ -162,7 +162,8 @@ def find_mbox_files(input_path: str, quiet: bool = False) -> List[str]:
 
 def import_mbox_single(
     input_path: str,
-    quiet: bool = False
+    quiet: bool = False,
+    max_age_years: int = 5
 ) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
     """
     Import a single MBOX file to a list of email dicts.
@@ -170,11 +171,17 @@ def import_mbox_single(
     Returns:
         Tuple of (emails_list, stats_dict)
     """
+    from email.utils import parsedate_to_datetime
+
     mbox = mailbox.mbox(input_path)
     emails = []
     total = 0
     skipped = 0
     spam_trash = 0
+    too_old = 0
+
+    # Calculate cutoff date
+    cutoff_date = datetime.now(timezone.utc) - timedelta(days=max_age_years * 365)
 
     for message in mbox:
         total += 1
@@ -199,6 +206,18 @@ def import_mbox_single(
             cc_addr = message.get("Cc", "")
             subject = message.get("Subject", "")
             date = message.get("Date", "")
+
+            # Filter by age early
+            if date:
+                try:
+                    msg_date = parsedate_to_datetime(date)
+                    if msg_date.tzinfo is None:
+                        msg_date = msg_date.replace(tzinfo=timezone.utc)
+                    if msg_date < cutoff_date:
+                        too_old += 1
+                        continue
+                except Exception:
+                    pass  # If date parsing fails, keep the message
 
             # Extract body (skipping attachments)
             plain_body, html_body = extract_body_from_message(message)
@@ -229,7 +248,7 @@ def import_mbox_single(
 
     mbox.close()
 
-    return emails, {"total": total, "imported": len(emails), "skipped": skipped, "spam_trash": spam_trash}
+    return emails, {"total": total, "imported": len(emails), "skipped": skipped, "spam_trash": spam_trash, "too_old": too_old}
 
 
 def import_mbox(
