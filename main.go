@@ -17,7 +17,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-const version = "0.5.0-alpha"
+const version = "0.5.1-alpha"
 
 // Colors matching the purple/green aesthetic
 var (
@@ -96,6 +96,7 @@ const (
 
 // Messages
 type (
+	setupNextMsg        struct{ step int }
 	setupCompleteMsg    struct{}
 	setupErrorMsg       struct{ err error }
 	stageCompleteMsg    struct{ stage stage; stats map[string]int }
@@ -123,8 +124,12 @@ type model struct {
 	results      map[string]map[string]int
 
 	// Setup state
-	setupStep    string
-	setupDone    bool
+	setupStep       int
+	setupSteps      []string
+	setupDone       bool
+
+	// Status message (for various screens)
+	statusMsg    string
 
 	// Error state
 	errMsg       string
@@ -153,7 +158,14 @@ func initialModel() model {
 		spinner:    s,
 		progress:   p,
 		stageStats: make(map[stage]map[string]int),
-		setupStep:  "Checking Python environment...",
+		setupStep:  -1,
+		setupSteps: []string{
+			"Creating Python environment",
+			"Installing core libraries",
+			"Installing Presidio (PII detection)",
+			"Installing spaCy (NLP)",
+			"Downloading language model (~500MB)",
+		},
 	}
 }
 
@@ -184,6 +196,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return tickMsg(t)
 		})
 
+	case setupNextMsg:
+		m.setupStep = msg.step
+		return m, runSetupStep(msg.step)
+
 	case setupCompleteMsg:
 		m.setupDone = true
 		m.screen = screenMainMenu
@@ -195,7 +211,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case ownerDetectedMsg:
 		m.textInput.SetValue(msg.email)
-		m.setupStep = fmt.Sprintf("Detected: %s", msg.email)
+		m.statusMsg = fmt.Sprintf("Detected: %s", msg.email)
 		return m, nil
 
 	case stageCompleteMsg:
@@ -295,7 +311,7 @@ func (m model) handleEnter() (tea.Model, tea.Cmd) {
 		m.screen = screenSenderFilter
 		m.textInput.SetValue("")
 		m.textInput.Placeholder = "Enter your email address..."
-		m.setupStep = "Detecting your email address..."
+		m.statusMsg = "Detecting your email address..."
 		return m, detectOwnerEmail(path)
 
 	case screenSenderFilter:
@@ -342,13 +358,35 @@ func (m model) viewSetup() string {
 	content := titleStyle.Render("Voice Synthesizer") + "\n"
 	content += subtitleStyle.Render("Email data preparation for GPT fine-tuning") + "\n"
 	content += subtitleStyle.Render("v"+version) + "\n\n"
-	content += m.spinner.View() + " " + m.setupStep + "\n"
+
+	// Show setup steps with status
+	for i, step := range m.setupSteps {
+		var icon string
+		var style lipgloss.Style
+
+		if i < m.setupStep {
+			// Completed
+			icon = "✓"
+			style = stageCompleteStyle
+		} else if i == m.setupStep {
+			// Current
+			icon = m.spinner.View()
+			style = stageRunningStyle
+		} else {
+			// Pending
+			icon = "○"
+			style = stagePendingStyle
+		}
+
+		content += fmt.Sprintf("%s %s\n", icon, style.Render(step))
+	}
 
 	if m.errMsg != "" {
 		content += "\n" + errorStyle.Render(m.errMsg)
 	}
 
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
+		menuStyle.Render(content))
 }
 
 func (m model) viewMainMenu() string {
@@ -391,7 +429,7 @@ func (m model) viewFilePicker() string {
 func (m model) viewSenderFilter() string {
 	content := titleStyle.Render("Sender Filter") + "\n"
 	content += subtitleStyle.Render("Filter to emails you wrote (not received)") + "\n\n"
-	content += dimStyle.Render(m.setupStep) + "\n\n"
+	content += dimStyle.Render(m.statusMsg) + "\n\n"
 	content += m.textInput.View() + "\n\n"
 	content += dimStyle.Render("Leave empty to keep all senders") + "\n"
 
@@ -574,44 +612,78 @@ func getScriptDir() string {
 
 // Commands
 
+// Setup step constants
+const (
+	setupStepVenv = iota
+	setupStepLightDeps
+	setupStepPresidio
+	setupStepSpacy
+	setupStepModel
+	setupStepDone
+)
+
+func runSetupStep(step int) tea.Cmd {
+	return func() tea.Msg {
+		cacheDir := getCacheDir()
+		venvDir := filepath.Join(cacheDir, "venv")
+		python := getVenvPython()
+
+		switch step {
+		case setupStepVenv:
+			// Check/create venv
+			if _, err := os.Stat(python); os.IsNotExist(err) {
+				if err := os.MkdirAll(cacheDir, 0755); err != nil {
+					return setupErrorMsg{err}
+				}
+				cmd := exec.Command("python3", "-m", "venv", venvDir)
+				if err := cmd.Run(); err != nil {
+					return setupErrorMsg{fmt.Errorf("failed to create venv: %w", err)}
+				}
+			}
+			return setupNextMsg{setupStepLightDeps}
+
+		case setupStepLightDeps:
+			// Check if we need to install anything
+			checkCmd := exec.Command(python, "-c", "import presidio_analyzer; import spacy; spacy.load('en_core_web_lg')")
+			if checkCmd.Run() == nil {
+				// All deps already installed
+				return setupCompleteMsg{}
+			}
+			// Install lightweight deps
+			cmd := exec.Command(python, "-m", "pip", "install", "--quiet", "ijson>=3.2.0", "datasketch>=1.6.0")
+			if err := cmd.Run(); err != nil {
+				return setupErrorMsg{fmt.Errorf("failed to install ijson/datasketch: %w", err)}
+			}
+			return setupNextMsg{setupStepPresidio}
+
+		case setupStepPresidio:
+			cmd := exec.Command(python, "-m", "pip", "install", "--quiet", "presidio-analyzer>=2.2.0", "presidio-anonymizer>=2.2.0")
+			if err := cmd.Run(); err != nil {
+				return setupErrorMsg{fmt.Errorf("failed to install Presidio: %w", err)}
+			}
+			return setupNextMsg{setupStepSpacy}
+
+		case setupStepSpacy:
+			cmd := exec.Command(python, "-m", "pip", "install", "--quiet", "spacy>=3.5.0")
+			if err := cmd.Run(); err != nil {
+				return setupErrorMsg{fmt.Errorf("failed to install spaCy: %w", err)}
+			}
+			return setupNextMsg{setupStepModel}
+
+		case setupStepModel:
+			cmd := exec.Command(python, "-m", "spacy", "download", "en_core_web_lg", "--quiet")
+			if err := cmd.Run(); err != nil {
+				return setupErrorMsg{fmt.Errorf("failed to download language model: %w", err)}
+			}
+			return setupCompleteMsg{}
+		}
+
+		return setupCompleteMsg{}
+	}
+}
+
 func checkPythonSetup() tea.Msg {
-	cacheDir := getCacheDir()
-	venvDir := filepath.Join(cacheDir, "venv")
-	python := getVenvPython()
-
-	// Check if venv exists
-	if _, err := os.Stat(python); os.IsNotExist(err) {
-		// Create venv
-		if err := os.MkdirAll(cacheDir, 0755); err != nil {
-			return setupErrorMsg{err}
-		}
-
-		cmd := exec.Command("python3", "-m", "venv", venvDir)
-		if err := cmd.Run(); err != nil {
-			return setupErrorMsg{fmt.Errorf("failed to create venv: %w", err)}
-		}
-	}
-
-	// Check for required packages
-	checkCmd := exec.Command(python, "-c", "import presidio_analyzer; import spacy; spacy.load('en_core_web_lg')")
-	if err := checkCmd.Run(); err != nil {
-		// Install dependencies
-		pipCmd := exec.Command(python, "-m", "pip", "install", "--quiet",
-			"ijson>=3.2.0", "datasketch>=1.6.0",
-			"presidio-analyzer>=2.2.0", "presidio-anonymizer>=2.2.0",
-			"spacy>=3.5.0")
-		if err := pipCmd.Run(); err != nil {
-			return setupErrorMsg{fmt.Errorf("failed to install dependencies: %w", err)}
-		}
-
-		// Download spacy model
-		spacyCmd := exec.Command(python, "-m", "spacy", "download", "en_core_web_lg", "--quiet")
-		if err := spacyCmd.Run(); err != nil {
-			return setupErrorMsg{fmt.Errorf("failed to download spacy model: %w", err)}
-		}
-	}
-
-	return setupCompleteMsg{}
+	return setupNextMsg{setupStepVenv}
 }
 
 func detectOwnerEmail(inputFile string) tea.Cmd {
