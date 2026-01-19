@@ -38,7 +38,7 @@ custom_style = Style([
 # Paths
 CACHE_DIR = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "voice-synth"
 JOBS_FILE = CACHE_DIR / "jobs.json"
-VERSION = "0.3.0-alpha"
+VERSION = "0.3.1-alpha"
 
 
 def clear_screen():
