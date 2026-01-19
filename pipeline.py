@@ -1247,12 +1247,14 @@ def main():
     import_parser = subparsers.add_parser("import", help="Import MBOX/zip/directory to JSON")
     import_parser.add_argument("input", help="Input: .zip, directory, or .mbox file")
     import_parser.add_argument("--out", help="Output JSON file")
+    import_parser.add_argument("--json-stats", action="store_true", help="Output JSON stats only")
 
     # Convert JSON to JSONL
     conv_parser = subparsers.add_parser("convert", help="Convert JSON to JSONL")
     conv_parser.add_argument("input", help="Input JSON file")
     conv_parser.add_argument("--out", help="Output JSONL file")
     conv_parser.add_argument("--no-filter", action="store_true", help="Don't filter fields")
+    conv_parser.add_argument("--json-stats", action="store_true", help="Output JSON stats only")
 
     # Clean and anonymize
     clean_parser = subparsers.add_parser("clean", help="Clean and anonymize emails")
@@ -1260,6 +1262,7 @@ def main():
     clean_parser.add_argument("--out", default="cleaned_emails.json", help="Output JSON file")
     clean_parser.add_argument("--sender", help="Filter to emails from this sender")
     clean_parser.add_argument("--years", type=int, default=5, help="Keep emails from past N years")
+    clean_parser.add_argument("--json-stats", action="store_true", help="Output JSON stats only")
 
     # Curate shortlist
     curate_parser = subparsers.add_parser("curate", help="Build style shortlist")
@@ -1270,6 +1273,7 @@ def main():
     curate_parser.add_argument("--no-dedupe", action="store_true", help="Skip deduplication")
     curate_parser.add_argument("--dedupe-threshold", type=float, default=0.8,
                                help="Similarity threshold for near-duplicate detection (0.0-1.0)")
+    curate_parser.add_argument("--json-stats", action="store_true", help="Output JSON stats only")
 
     detect_parser = subparsers.add_parser("detect-owner", help="Detect owner email from mbox")
     detect_parser.add_argument("input", help="Input MBOX file or directory")
@@ -1308,32 +1312,44 @@ def main():
             print(json.dumps(results, indent=2, default=str))
 
     elif args.command == "import":
-        results = import_mbox(args.input, args.out)
-        if results['imported'] > 0:
+        results = import_mbox(args.input, args.out, quiet=getattr(args, 'json_stats', False))
+        if getattr(args, 'json_stats', False):
+            print(json.dumps(results))
+        elif results['imported'] > 0:
             files_msg = f" from {results['files']} files" if results.get('files', 1) > 1 else ""
             print(f"\n✅ Done! Imported {results['imported']} of {results['total']} emails{files_msg}.")
             print(f"📄 Output: {results['output']}")
 
     elif args.command == "convert":
-        results = convert_to_jsonl(args.input, args.out, not args.no_filter)
-        print(f"Done. Output: {results['output']}")
+        results = convert_to_jsonl(args.input, args.out, not args.no_filter, quiet=getattr(args, 'json_stats', False))
+        if getattr(args, 'json_stats', False):
+            print(json.dumps(results))
+        else:
+            print(f"Done. Output: {results['output']}")
 
     elif args.command == "clean":
-        results = clean_emails(args.input, args.out, args.sender, args.years)
-        print(f"\nDone. Kept {results['kept']} of {results['total']} emails.")
-        print(f"Output: {results['output']}")
+        results = clean_emails(args.input, args.out, args.sender, args.years, quiet=getattr(args, 'json_stats', False))
+        if getattr(args, 'json_stats', False):
+            print(json.dumps(results))
+        else:
+            print(f"\nDone. Kept {results['kept']} of {results['total']} emails.")
+            print(f"Output: {results['output']}")
 
     elif args.command == "curate":
         results = build_shortlist(
             args.input, args.out, args.per_topic, args.min_chars,
             dedupe=not args.no_dedupe,
-            dedupe_threshold=args.dedupe_threshold
+            dedupe_threshold=args.dedupe_threshold,
+            quiet=getattr(args, 'json_stats', False)
         )
-        print(f"\nDone. Shortlisted {results['shortlisted']} emails.")
-        if "deduplication" in results:
-            d = results["deduplication"]
-            print(f"Removed {d['removed']} duplicates ({d['exact_dupes']} exact, {d['near_dupes']} near)")
-        print(f"Output: {results['output']}")
+        if getattr(args, 'json_stats', False):
+            print(json.dumps(results))
+        else:
+            print(f"\nDone. Shortlisted {results['shortlisted']} emails.")
+            if "deduplication" in results:
+                d = results["deduplication"]
+                print(f"Removed {d['removed']} duplicates ({d['exact_dupes']} exact, {d['near_dupes']} near)")
+            print(f"Output: {results['output']}")
 
     elif args.command == "detect-owner":
         email = detect_owner_email(args.input)

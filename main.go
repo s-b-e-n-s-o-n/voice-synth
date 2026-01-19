@@ -1,0 +1,711 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"time"
+
+	"github.com/charmbracelet/bubbles/progress"
+	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+)
+
+const version = "0.5.0-alpha"
+
+// Colors matching the purple/green aesthetic
+var (
+	purple    = lipgloss.Color("#9370DB")
+	green     = lipgloss.Color("#00FF7F")
+	dim       = lipgloss.Color("#666666")
+	white     = lipgloss.Color("#FFFFFF")
+	red       = lipgloss.Color("#FF6B6B")
+	yellow    = lipgloss.Color("#FFD93D")
+
+	titleStyle = lipgloss.NewStyle().
+			Foreground(purple).
+			Bold(true).
+			MarginBottom(1)
+
+	subtitleStyle = lipgloss.NewStyle().
+			Foreground(dim).
+			MarginBottom(1)
+
+	menuStyle = lipgloss.NewStyle().
+			Border(lipgloss.DoubleBorder()).
+			BorderForeground(purple).
+			Padding(1, 3).
+			Width(50)
+
+	selectedStyle = lipgloss.NewStyle().
+			Foreground(green).
+			Bold(true)
+
+	normalStyle = lipgloss.NewStyle().
+			Foreground(white)
+
+	errorStyle = lipgloss.NewStyle().
+			Foreground(red)
+
+	successStyle = lipgloss.NewStyle().
+			Foreground(green)
+
+	dimStyle = lipgloss.NewStyle().
+			Foreground(dim)
+
+	stageCompleteStyle = lipgloss.NewStyle().
+				Foreground(green)
+
+	stageRunningStyle = lipgloss.NewStyle().
+				Foreground(yellow)
+
+	stagePendingStyle = lipgloss.NewStyle().
+				Foreground(dim)
+)
+
+// Screen types
+type screen int
+
+const (
+	screenMainMenu screen = iota
+	screenFilePicker
+	screenSenderFilter
+	screenProgress
+	screenResults
+	screenHelp
+	screenUninstall
+	screenSetup
+)
+
+// Pipeline stages
+type stage int
+
+const (
+	stageImport stage = iota
+	stageConvert
+	stageClean
+	stageCurate
+	stageDone
+)
+
+// Messages
+type (
+	setupCompleteMsg    struct{}
+	setupErrorMsg       struct{ err error }
+	stageCompleteMsg    struct{ stage stage; stats map[string]int }
+	stageErrorMsg       struct{ stage stage; err error }
+	pipelineCompleteMsg struct{ results map[string]map[string]int }
+	ownerDetectedMsg    struct{ email string }
+	tickMsg             time.Time
+)
+
+// Model
+type model struct {
+	screen       screen
+	menuCursor   int
+	menuItems    []string
+	textInput    textinput.Model
+	spinner      spinner.Model
+	progress     progress.Model
+
+	// Pipeline state
+	inputFile    string
+	sender       string
+	workDir      string
+	currentStage stage
+	stageStats   map[stage]map[string]int
+	results      map[string]map[string]int
+
+	// Setup state
+	setupStep    string
+	setupDone    bool
+
+	// Error state
+	errMsg       string
+
+	// Screen dimensions
+	width        int
+	height       int
+}
+
+func initialModel() model {
+	ti := textinput.New()
+	ti.Placeholder = "Drag file here or type path..."
+	ti.Focus()
+	ti.Width = 40
+
+	s := spinner.New()
+	s.Spinner = spinner.Dot
+	s.Style = lipgloss.NewStyle().Foreground(purple)
+
+	p := progress.New(progress.WithDefaultGradient())
+
+	return model{
+		screen:     screenSetup,
+		menuItems:  []string{"Get Started", "Help", "Uninstall", "Quit"},
+		textInput:  ti,
+		spinner:    s,
+		progress:   p,
+		stageStats: make(map[stage]map[string]int),
+		setupStep:  "Checking Python environment...",
+	}
+}
+
+func (m model) Init() tea.Cmd {
+	return tea.Batch(
+		m.spinner.Tick,
+		checkPythonSetup,
+	)
+}
+
+func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		return m.handleKeyPress(msg)
+
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		return m, nil
+
+	case spinner.TickMsg:
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		return m, cmd
+
+	case tickMsg:
+		return m, tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
+			return tickMsg(t)
+		})
+
+	case setupCompleteMsg:
+		m.setupDone = true
+		m.screen = screenMainMenu
+		return m, nil
+
+	case setupErrorMsg:
+		m.errMsg = msg.err.Error()
+		return m, nil
+
+	case ownerDetectedMsg:
+		m.textInput.SetValue(msg.email)
+		m.setupStep = fmt.Sprintf("Detected: %s", msg.email)
+		return m, nil
+
+	case stageCompleteMsg:
+		m.stageStats[msg.stage] = msg.stats
+		m.currentStage = msg.stage + 1
+		if m.currentStage < stageDone {
+			return m, runPipelineStage(m.inputFile, m.sender, m.workDir, m.currentStage)
+		}
+		return m, nil
+
+	case stageErrorMsg:
+		m.errMsg = msg.err.Error()
+		return m, nil
+
+	case pipelineCompleteMsg:
+		m.results = msg.results
+		m.screen = screenResults
+		return m, nil
+	}
+
+	// Update text input when on file picker or sender filter screens
+	if m.screen == screenFilePicker || m.screen == screenSenderFilter {
+		var cmd tea.Cmd
+		m.textInput, cmd = m.textInput.Update(msg)
+		return m, cmd
+	}
+
+	return m, nil
+}
+
+func (m model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c", "q":
+		if m.screen == screenMainMenu || m.screen == screenResults {
+			return m, tea.Quit
+		}
+		// Go back to main menu
+		m.screen = screenMainMenu
+		m.errMsg = ""
+		return m, nil
+
+	case "esc":
+		if m.screen != screenMainMenu && m.screen != screenProgress {
+			m.screen = screenMainMenu
+			m.errMsg = ""
+		}
+		return m, nil
+
+	case "up", "k":
+		if m.screen == screenMainMenu && m.menuCursor > 0 {
+			m.menuCursor--
+		}
+		return m, nil
+
+	case "down", "j":
+		if m.screen == screenMainMenu && m.menuCursor < len(m.menuItems)-1 {
+			m.menuCursor++
+		}
+		return m, nil
+
+	case "enter":
+		return m.handleEnter()
+	}
+
+	return m, nil
+}
+
+func (m model) handleEnter() (tea.Model, tea.Cmd) {
+	switch m.screen {
+	case screenMainMenu:
+		switch m.menuItems[m.menuCursor] {
+		case "Get Started":
+			m.screen = screenFilePicker
+			m.textInput.SetValue("")
+			m.textInput.Placeholder = "Drag file here or type path..."
+			m.textInput.Focus()
+		case "Help":
+			m.screen = screenHelp
+		case "Uninstall":
+			m.screen = screenUninstall
+		case "Quit":
+			return m, tea.Quit
+		}
+
+	case screenFilePicker:
+		path := cleanPath(m.textInput.Value())
+		if path == "" {
+			m.errMsg = "Please enter a file path"
+			return m, nil
+		}
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			m.errMsg = fmt.Sprintf("File not found: %s", path)
+			return m, nil
+		}
+		m.inputFile = path
+		m.errMsg = ""
+		m.screen = screenSenderFilter
+		m.textInput.SetValue("")
+		m.textInput.Placeholder = "Enter your email address..."
+		m.setupStep = "Detecting your email address..."
+		return m, detectOwnerEmail(path)
+
+	case screenSenderFilter:
+		m.sender = m.textInput.Value()
+		m.workDir, _ = os.Getwd()
+		m.screen = screenProgress
+		m.currentStage = stageImport
+		m.errMsg = ""
+		return m, tea.Batch(
+			m.spinner.Tick,
+			runPipelineStage(m.inputFile, m.sender, m.workDir, stageImport),
+		)
+
+	case screenResults, screenHelp, screenUninstall:
+		m.screen = screenMainMenu
+	}
+
+	return m, nil
+}
+
+func (m model) View() string {
+	switch m.screen {
+	case screenSetup:
+		return m.viewSetup()
+	case screenMainMenu:
+		return m.viewMainMenu()
+	case screenFilePicker:
+		return m.viewFilePicker()
+	case screenSenderFilter:
+		return m.viewSenderFilter()
+	case screenProgress:
+		return m.viewProgress()
+	case screenResults:
+		return m.viewResults()
+	case screenHelp:
+		return m.viewHelp()
+	case screenUninstall:
+		return m.viewUninstall()
+	}
+	return ""
+}
+
+func (m model) viewSetup() string {
+	content := titleStyle.Render("Voice Synthesizer") + "\n"
+	content += subtitleStyle.Render("Email data preparation for GPT fine-tuning") + "\n"
+	content += subtitleStyle.Render("v"+version) + "\n\n"
+	content += m.spinner.View() + " " + m.setupStep + "\n"
+
+	if m.errMsg != "" {
+		content += "\n" + errorStyle.Render(m.errMsg)
+	}
+
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+}
+
+func (m model) viewMainMenu() string {
+	content := titleStyle.Render("Voice Synthesizer") + "\n"
+	content += subtitleStyle.Render("Email data preparation for GPT fine-tuning") + "\n"
+	content += subtitleStyle.Render("v"+version) + "\n\n"
+
+	for i, item := range m.menuItems {
+		cursor := "  "
+		style := normalStyle
+		if i == m.menuCursor {
+			cursor = "▸ "
+			style = selectedStyle
+		}
+		content += cursor + style.Render(item) + "\n"
+	}
+
+	content += "\n" + dimStyle.Render("↑/↓ navigate • enter select • q quit")
+
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
+		menuStyle.Render(content))
+}
+
+func (m model) viewFilePicker() string {
+	content := titleStyle.Render("Select Input File") + "\n"
+	content += subtitleStyle.Render("Drop your Google Takeout export (.mbox, folder, or .zip)") + "\n\n"
+	content += m.textInput.View() + "\n\n"
+	content += dimStyle.Render("Drag from Finder into this window, then press Enter") + "\n"
+
+	if m.errMsg != "" {
+		content += "\n" + errorStyle.Render(m.errMsg)
+	}
+
+	content += "\n" + dimStyle.Render("enter continue • esc back")
+
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
+		menuStyle.Render(content))
+}
+
+func (m model) viewSenderFilter() string {
+	content := titleStyle.Render("Sender Filter") + "\n"
+	content += subtitleStyle.Render("Filter to emails you wrote (not received)") + "\n\n"
+	content += dimStyle.Render(m.setupStep) + "\n\n"
+	content += m.textInput.View() + "\n\n"
+	content += dimStyle.Render("Leave empty to keep all senders") + "\n"
+
+	if m.errMsg != "" {
+		content += "\n" + errorStyle.Render(m.errMsg)
+	}
+
+	content += "\n" + dimStyle.Render("enter continue • esc back")
+
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
+		menuStyle.Render(content))
+}
+
+func (m model) viewProgress() string {
+	content := titleStyle.Render("Processing Emails") + "\n"
+	content += subtitleStyle.Render("This may take a few minutes for large mailboxes") + "\n\n"
+
+	stages := []struct {
+		s    stage
+		name string
+	}{
+		{stageImport, "Import MBOX"},
+		{stageConvert, "Convert to JSONL"},
+		{stageClean, "Clean & anonymize"},
+		{stageCurate, "Curate shortlist"},
+	}
+
+	for _, st := range stages {
+		var icon, text string
+		var style lipgloss.Style
+
+		if stats, ok := m.stageStats[st.s]; ok {
+			// Completed
+			icon = "✓"
+			style = stageCompleteStyle
+			if count, ok := stats["kept"]; ok {
+				text = fmt.Sprintf("%s (%d)", st.name, count)
+			} else if count, ok := stats["imported"]; ok {
+				text = fmt.Sprintf("%s (%d)", st.name, count)
+			} else if count, ok := stats["shortlisted"]; ok {
+				text = fmt.Sprintf("%s (%d)", st.name, count)
+			} else {
+				text = st.name
+			}
+		} else if st.s == m.currentStage {
+			// Running
+			icon = m.spinner.View()
+			style = stageRunningStyle
+			text = st.name + "..."
+		} else {
+			// Pending
+			icon = "○"
+			style = stagePendingStyle
+			text = st.name
+		}
+
+		content += fmt.Sprintf("%s %s\n", icon, style.Render(text))
+	}
+
+	if m.errMsg != "" {
+		content += "\n" + errorStyle.Render("Error: "+m.errMsg)
+	}
+
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
+		menuStyle.Render(content))
+}
+
+func (m model) viewResults() string {
+	content := successStyle.Render("✓ Processing Complete!") + "\n\n"
+
+	// Show output path
+	home, _ := os.UserHomeDir()
+	outputPath := filepath.Join(home, "Desktop", "style_shortlist.csv")
+	content += "Output: " + dimStyle.Render(outputPath) + "\n\n"
+
+	// Results table
+	content += "Stage      Input    Output   Filtered\n"
+	content += "─────────────────────────────────────\n"
+
+	if stats, ok := m.results["import"]; ok {
+		content += fmt.Sprintf("Import     %5d    %5d    %5d\n",
+			stats["total"], stats["imported"], stats["skipped"])
+	}
+	if stats, ok := m.results["convert"]; ok {
+		content += fmt.Sprintf("Convert    %5d    %5d    %5d\n",
+			stats["total"], stats["kept"], stats["total"]-stats["kept"])
+	}
+	if stats, ok := m.results["clean"]; ok {
+		content += fmt.Sprintf("Clean      %5d    %5d    %5d\n",
+			stats["total"], stats["kept"], stats["total"]-stats["kept"])
+	}
+	if stats, ok := m.results["curate"]; ok {
+		content += fmt.Sprintf("Curate     %5d    %5d    %5d\n",
+			stats["total_input"], stats["shortlisted"], stats["total_input"]-stats["shortlisted"])
+	}
+
+	content += "\n" + dimStyle.Render("Open the CSV in a spreadsheet to review") + "\n"
+	content += "\n" + dimStyle.Render("enter done • q quit")
+
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
+		menuStyle.Width(60).Render(content))
+}
+
+func (m model) viewHelp() string {
+	content := titleStyle.Render("Help") + "\n\n"
+	content += selectedStyle.Render("Pipeline Stages") + "\n"
+	content += "0. Import   - Import MBOX, strip attachments\n"
+	content += "1. Convert  - Convert to JSONL format\n"
+	content += "2. Clean    - Anonymize PII with Presidio\n"
+	content += "3. Curate   - Score and output CSV\n\n"
+
+	content += selectedStyle.Render("Quick Start") + "\n"
+	content += "1. Export mail from takeout.google.com\n"
+	content += "2. Select your .mbox file\n"
+	content += "3. Enter your email address\n"
+	content += "4. Review style_shortlist.csv\n\n"
+
+	content += selectedStyle.Render("CLI Usage") + "\n"
+	content += dimStyle.Render("./voice-synth run <file> --sender <email>") + "\n"
+
+	content += "\n" + dimStyle.Render("enter/esc back")
+
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
+		menuStyle.Width(55).Render(content))
+}
+
+func (m model) viewUninstall() string {
+	content := titleStyle.Render("Uninstall") + "\n\n"
+	content += "This will delete:\n"
+	content += dimStyle.Render("~/.cache/voice-synth/") + "\n\n"
+	content += dimStyle.Render("Press 'y' to confirm, any other key to cancel")
+
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
+		menuStyle.Render(content))
+}
+
+// Helper functions
+
+func cleanPath(path string) string {
+	path = strings.TrimSpace(path)
+	// Remove surrounding quotes
+	if (strings.HasPrefix(path, "'") && strings.HasSuffix(path, "'")) ||
+		(strings.HasPrefix(path, "\"") && strings.HasSuffix(path, "\"")) {
+		path = path[1 : len(path)-1]
+	}
+	// Handle escaped spaces
+	path = strings.ReplaceAll(path, "\\ ", " ")
+	// Handle file:// URLs
+	if strings.HasPrefix(path, "file://") {
+		path = path[7:]
+	}
+	// Expand ~
+	if strings.HasPrefix(path, "~") {
+		home, _ := os.UserHomeDir()
+		path = filepath.Join(home, path[1:])
+	}
+	return path
+}
+
+func getCacheDir() string {
+	if xdg := os.Getenv("XDG_CACHE_HOME"); xdg != "" {
+		return filepath.Join(xdg, "voice-synth")
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".cache", "voice-synth")
+}
+
+func getVenvPython() string {
+	venv := filepath.Join(getCacheDir(), "venv")
+	if runtime.GOOS == "windows" {
+		return filepath.Join(venv, "Scripts", "python.exe")
+	}
+	return filepath.Join(venv, "bin", "python3")
+}
+
+func getScriptDir() string {
+	exe, _ := os.Executable()
+	return filepath.Dir(exe)
+}
+
+// Commands
+
+func checkPythonSetup() tea.Msg {
+	cacheDir := getCacheDir()
+	venvDir := filepath.Join(cacheDir, "venv")
+	python := getVenvPython()
+
+	// Check if venv exists
+	if _, err := os.Stat(python); os.IsNotExist(err) {
+		// Create venv
+		if err := os.MkdirAll(cacheDir, 0755); err != nil {
+			return setupErrorMsg{err}
+		}
+
+		cmd := exec.Command("python3", "-m", "venv", venvDir)
+		if err := cmd.Run(); err != nil {
+			return setupErrorMsg{fmt.Errorf("failed to create venv: %w", err)}
+		}
+	}
+
+	// Check for required packages
+	checkCmd := exec.Command(python, "-c", "import presidio_analyzer; import spacy; spacy.load('en_core_web_lg')")
+	if err := checkCmd.Run(); err != nil {
+		// Install dependencies
+		pipCmd := exec.Command(python, "-m", "pip", "install", "--quiet",
+			"ijson>=3.2.0", "datasketch>=1.6.0",
+			"presidio-analyzer>=2.2.0", "presidio-anonymizer>=2.2.0",
+			"spacy>=3.5.0")
+		if err := pipCmd.Run(); err != nil {
+			return setupErrorMsg{fmt.Errorf("failed to install dependencies: %w", err)}
+		}
+
+		// Download spacy model
+		spacyCmd := exec.Command(python, "-m", "spacy", "download", "en_core_web_lg", "--quiet")
+		if err := spacyCmd.Run(); err != nil {
+			return setupErrorMsg{fmt.Errorf("failed to download spacy model: %w", err)}
+		}
+	}
+
+	return setupCompleteMsg{}
+}
+
+func detectOwnerEmail(inputFile string) tea.Cmd {
+	return func() tea.Msg {
+		python := getVenvPython()
+		scriptDir := getScriptDir()
+		pipelineScript := filepath.Join(scriptDir, "pipeline.py")
+
+		cmd := exec.Command(python, pipelineScript, "detect-owner", inputFile)
+		output, err := cmd.Output()
+		if err != nil {
+			return ownerDetectedMsg{email: ""}
+		}
+
+		email := strings.TrimSpace(string(output))
+		return ownerDetectedMsg{email: email}
+	}
+}
+
+func runPipelineStage(inputFile, sender, workDir string, s stage) tea.Cmd {
+	return func() tea.Msg {
+		python := getVenvPython()
+		scriptDir := getScriptDir()
+		pipelineScript := filepath.Join(scriptDir, "pipeline.py")
+
+		var args []string
+		switch s {
+		case stageImport:
+			args = []string{pipelineScript, "import", inputFile, "--out", "emails_raw.json", "--json-stats"}
+		case stageConvert:
+			// Use emails_raw.json if it exists, otherwise use inputFile
+			convertInput := filepath.Join(workDir, "emails_raw.json")
+			if _, err := os.Stat(convertInput); os.IsNotExist(err) {
+				convertInput = inputFile
+			}
+			args = []string{pipelineScript, "convert", convertInput, "--out", "emails.jsonl", "--json-stats"}
+		case stageClean:
+			args = []string{pipelineScript, "clean", "emails.jsonl", "--out", "cleaned_emails.json", "--json-stats"}
+			if sender != "" {
+				args = append(args, "--sender", sender)
+			}
+		case stageCurate:
+			args = []string{pipelineScript, "curate", "cleaned_emails.json", "--out", "style_shortlist.csv", "--json-stats"}
+		}
+
+		cmd := exec.Command(python, args...)
+		cmd.Dir = workDir
+
+		output, err := cmd.Output()
+		if err != nil {
+			return stageErrorMsg{stage: s, err: fmt.Errorf("stage failed: %w", err)}
+		}
+
+		// Parse JSON stats from output
+		var stats map[string]int
+		lines := strings.Split(string(output), "\n")
+		for _, line := range lines {
+			if strings.HasPrefix(line, "{") {
+				if err := json.Unmarshal([]byte(line), &stats); err == nil {
+					break
+				}
+			}
+		}
+
+		if s == stageCurate {
+			// Copy to desktop
+			home, _ := os.UserHomeDir()
+			desktop := filepath.Join(home, "Desktop", "style_shortlist.csv")
+			src := filepath.Join(workDir, "style_shortlist.csv")
+			copyFile(src, desktop)
+
+			// Return all results
+			results := make(map[string]map[string]int)
+			// This is simplified - in practice we'd collect all stats
+			results["curate"] = stats
+			return pipelineCompleteMsg{results: results}
+		}
+
+		return stageCompleteMsg{stage: s, stats: stats}
+	}
+}
+
+func copyFile(src, dst string) error {
+	input, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(dst, input, 0644)
+}
+
+func main() {
+	p := tea.NewProgram(initialModel(), tea.WithAltScreen())
+	if _, err := p.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+}
