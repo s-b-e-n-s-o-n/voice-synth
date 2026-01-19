@@ -179,6 +179,24 @@ func (m model) Init() tea.Cmd {
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// On screens with text input, let textInput handle most keys
+		if m.screen == screenFilePicker || m.screen == screenSenderFilter {
+			switch msg.String() {
+			case "ctrl+c":
+				return m, tea.Quit
+			case "esc":
+				m.screen = screenMainMenu
+				m.errMsg = ""
+				return m, nil
+			case "enter":
+				return m.handleEnter()
+			default:
+				// Pass all other keys to text input
+				var cmd tea.Cmd
+				m.textInput, cmd = m.textInput.Update(msg)
+				return m, cmd
+			}
+		}
 		return m.handleKeyPress(msg)
 
 	case tea.WindowSizeMsg:
@@ -230,13 +248,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.results = msg.results
 		m.screen = screenResults
 		return m, nil
-	}
-
-	// Update text input when on file picker or sender filter screens
-	if m.screen == screenFilePicker || m.screen == screenSenderFilter {
-		var cmd tea.Cmd
-		m.textInput, cmd = m.textInput.Update(msg)
-		return m, cmd
 	}
 
 	return m, nil
