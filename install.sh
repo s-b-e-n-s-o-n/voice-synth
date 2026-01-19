@@ -31,10 +31,10 @@ INSTALL_DIR="$HOME/voice-synth"
 
 echo -e "${DIM}Downloading...${RESET}"
 cd ~
-rm -rf voice-synth-main 2>/dev/null || true
-curl -sL https://github.com/s-b-e-n-s-o-n/voice-synth/archive/main.tar.gz | tar xz
+rm -rf voice-synth-feature-textual-tui 2>/dev/null || true
+curl -sL https://github.com/s-b-e-n-s-o-n/voice-synth/archive/feature/textual-tui.tar.gz | tar xz
 rm -rf "$INSTALL_DIR" 2>/dev/null || true
-mv voice-synth-main "$INSTALL_DIR"
+mv voice-synth-feature-textual-tui "$INSTALL_DIR"
 
 echo -e "${GREEN}✓${RESET} Installed to ${DIM}$INSTALL_DIR${RESET}"
 echo ""
