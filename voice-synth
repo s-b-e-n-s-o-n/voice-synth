@@ -152,11 +152,11 @@ def check_spacy_model():
 
 
 def install_lightweight_deps():
-    """Install lightweight dependencies (textual, rich, ijson, datasketch)."""
+    """Install lightweight dependencies (questionary, rich, ijson, datasketch)."""
     packages = []
 
-    if not check_import("textual"):
-        packages.append("textual>=1.0.0")
+    if not check_import("questionary"):
+        packages.append("questionary>=2.0.0")
     if not check_import("rich"):
         packages.append("rich>=13.0.0")
     if not check_import("ijson"):
@@ -269,7 +269,7 @@ def check_all_deps():
         return False
 
     checks = [
-        check_import("textual"),
+        check_import("questionary"),
         check_import("rich"),
         check_import("ijson"),
         check_import("datasketch"),
@@ -345,22 +345,9 @@ def run_tui_mode():
         print(f"\n  {YELLOW}!{RESET} Setup failed. Please check your Python installation.")
         sys.exit(1)
 
-    # Clear and show loading message
-    print("\033[2J\033[H", end="")  # Clear screen
-    print_banner()
-    print(center(f"{DIM}Loading...{RESET}"))
-
-    # Import and run TUI (now that deps are installed)
-    # We need to run this in the venv's Python
-    tui_runner = f'''
-import sys
-sys.path.insert(0, "{SCRIPT_DIR}")
-from tui import VoiceSynthApp
-app = VoiceSynthApp()
-app.run()
-'''
-
-    os.execv(str(PYTHON), [str(PYTHON), "-c", tui_runner])
+    # Run the simple questionary-based TUI
+    tui_path = SCRIPT_DIR / "tui.py"
+    os.execv(str(PYTHON), [str(PYTHON), str(tui_path)])
 
 
 def main():
