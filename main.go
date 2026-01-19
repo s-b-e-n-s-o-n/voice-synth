@@ -133,6 +133,9 @@ type model struct {
 	// Status message (for various screens)
 	statusMsg    string
 
+	// Resume state
+	incompleteJob *Job
+
 	// Error state
 	errMsg       string
 
@@ -225,6 +228,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case setupCompleteMsg:
 		m.setupDone = true
 		m.screen = screenMainMenu
+		// Check for incomplete job
+		m.incompleteJob = getIncompleteJob()
+		if m.incompleteJob != nil {
+			m.menuItems = []string{"Resume previous", "Get Started", "Help", "Uninstall", "Quit"}
+		}
 		return m, nil
 
 	case setupErrorMsg:
@@ -252,6 +260,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case pipelineCompleteMsg:
 		m.results = msg.results
 		m.screen = screenResults
+		// Mark job as complete
+		markJobComplete(m.workDir)
 		return m, nil
 	}
 
@@ -299,6 +309,35 @@ func (m model) handleEnter() (tea.Model, tea.Cmd) {
 	switch m.screen {
 	case screenMainMenu:
 		switch m.menuItems[m.menuCursor] {
+		case "Resume previous":
+			if m.incompleteJob != nil {
+				m.inputFile = m.incompleteJob.Mbox
+				m.sender = m.incompleteJob.Sender
+				m.workDir = m.incompleteJob.WorkDir
+				m.screen = screenProgress
+				m.errMsg = ""
+				// Determine which stage to resume from
+				resumeStage := stageImport
+				if _, err := os.Stat(filepath.Join(m.workDir, "cleaned_emails.json")); err == nil {
+					resumeStage = stageCurate
+					// Mark prior stages as complete
+					m.stageStats[stageImport] = map[string]int{"resumed": 1}
+					m.stageStats[stageConvert] = map[string]int{"resumed": 1}
+					m.stageStats[stageClean] = map[string]int{"resumed": 1}
+				} else if _, err := os.Stat(filepath.Join(m.workDir, "emails.jsonl")); err == nil {
+					resumeStage = stageClean
+					m.stageStats[stageImport] = map[string]int{"resumed": 1}
+					m.stageStats[stageConvert] = map[string]int{"resumed": 1}
+				} else if _, err := os.Stat(filepath.Join(m.workDir, "emails_raw.json")); err == nil {
+					resumeStage = stageConvert
+					m.stageStats[stageImport] = map[string]int{"resumed": 1}
+				}
+				m.currentStage = resumeStage
+				return m, tea.Batch(
+					m.spinner.Tick,
+					runPipelineStage(m.inputFile, m.sender, m.workDir, resumeStage),
+				)
+			}
 		case "Get Started":
 			m.screen = screenFilePicker
 			m.textInput.SetValue("")
@@ -345,6 +384,8 @@ func (m model) handleEnter() (tea.Model, tea.Cmd) {
 		m.screen = screenProgress
 		m.currentStage = stageImport
 		m.errMsg = ""
+		// Save job for resume
+		saveJob(m.inputFile, m.workDir, "in_progress", m.sender)
 		return m, tea.Batch(
 			m.spinner.Tick,
 			runPipelineStage(m.inputFile, m.sender, m.workDir, stageImport),
@@ -444,7 +485,13 @@ func (m model) viewMainMenu() string {
 			cursor = "▸ "
 			style = selectedStyle
 		}
-		content += cursor + style.Render(item) + "\n"
+		line := cursor + style.Render(item)
+		// Show file info for resume option
+		if item == "Resume previous" && m.incompleteJob != nil {
+			filename := filepath.Base(m.incompleteJob.Mbox)
+			line += " " + dimStyle.Render("("+filename+")")
+		}
+		content += line + "\n"
 	}
 
 	content += "\n" + dimStyle.Render("↑/↓ navigate • enter select • q quit")
@@ -625,6 +672,108 @@ func (m model) viewUninstall() string {
 		menuStyle.Render(content))
 }
 
+// Job tracking for resume feature
+
+type Job struct {
+	Mbox      string `json:"mbox"`
+	WorkDir   string `json:"work_dir"`
+	Status    string `json:"status"`
+	Sender    string `json:"sender"`
+	Started   string `json:"started"`
+	Updated   string `json:"updated"`
+}
+
+func getJobsFile() string {
+	return filepath.Join(getCacheDir(), "jobs.json")
+}
+
+func loadJobs() []Job {
+	data, err := os.ReadFile(getJobsFile())
+	if err != nil {
+		return []Job{}
+	}
+	var jobs []Job
+	if err := json.Unmarshal(data, &jobs); err != nil {
+		return []Job{}
+	}
+	return jobs
+}
+
+func saveJob(mbox, workDir, status, sender string) {
+	jobs := loadJobs()
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	// Update existing or add new
+	found := false
+	for i := range jobs {
+		if jobs[i].Mbox == mbox && jobs[i].WorkDir == workDir {
+			jobs[i].Status = status
+			jobs[i].Updated = now
+			if sender != "" {
+				jobs[i].Sender = sender
+			}
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		jobs = append(jobs, Job{
+			Mbox:    mbox,
+			WorkDir: workDir,
+			Status:  status,
+			Sender:  sender,
+			Started: now,
+			Updated: now,
+		})
+	}
+
+	// Keep last 10
+	if len(jobs) > 10 {
+		jobs = jobs[len(jobs)-10:]
+	}
+
+	data, _ := json.MarshalIndent(jobs, "", "  ")
+	os.MkdirAll(getCacheDir(), 0755)
+	os.WriteFile(getJobsFile(), data, 0644)
+}
+
+func getIncompleteJob() *Job {
+	for _, job := range loadJobs() {
+		if job.Status != "in_progress" {
+			continue
+		}
+		// Check if work dir exists
+		if _, err := os.Stat(job.WorkDir); os.IsNotExist(err) {
+			continue
+		}
+		// Check if already completed
+		if _, err := os.Stat(filepath.Join(job.WorkDir, "style_shortlist.csv")); err == nil {
+			continue
+		}
+		// Check for intermediate files
+		for _, f := range []string{"emails_raw.json", "emails.jsonl", "cleaned_emails.json"} {
+			if _, err := os.Stat(filepath.Join(job.WorkDir, f)); err == nil {
+				return &job
+			}
+		}
+	}
+	return nil
+}
+
+func markJobComplete(workDir string) {
+	jobs := loadJobs()
+	now := time.Now().UTC().Format(time.RFC3339)
+	for i := range jobs {
+		if jobs[i].WorkDir == workDir {
+			jobs[i].Status = "completed"
+			jobs[i].Updated = now
+		}
+	}
+	data, _ := json.MarshalIndent(jobs, "", "  ")
+	os.WriteFile(getJobsFile(), data, 0644)
+}
+
 // Helper functions
 
 func cleanPath(path string) string {
@@ -791,9 +940,14 @@ func runPipelineStage(inputFile, sender, workDir string, s stage) tea.Cmd {
 		cmd := exec.Command(python, args...)
 		cmd.Dir = workDir
 
-		output, err := cmd.Output()
+		output, err := cmd.CombinedOutput()
 		if err != nil {
-			return stageErrorMsg{stage: s, err: fmt.Errorf("stage failed: %w", err)}
+			// Include actual error output
+			errDetail := strings.TrimSpace(string(output))
+			if len(errDetail) > 200 {
+				errDetail = errDetail[len(errDetail)-200:]
+			}
+			return stageErrorMsg{stage: s, err: fmt.Errorf("%s", errDetail)}
 		}
 
 		// Parse JSON stats from output
