@@ -345,8 +345,10 @@ def run_tui_mode():
         print(f"\n  {YELLOW}!{RESET} Setup failed. Please check your Python installation.")
         sys.exit(1)
 
-    # Clear and relaunch with Textual
+    # Clear and show loading message
     print("\033[2J\033[H", end="")  # Clear screen
+    print_banner()
+    print(center(f"{DIM}Loading...{RESET}"))
 
     # Import and run TUI (now that deps are installed)
     # We need to run this in the venv's Python
