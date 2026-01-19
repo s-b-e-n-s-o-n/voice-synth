@@ -22,14 +22,6 @@ DIM = "\033[38;5;245m"
 BOLD = "\033[1m"
 RESET = "\033[0m"
 
-# Box drawing characters
-BOX_TL = "\u2554"  # ╔
-BOX_TR = "\u2557"  # ╗
-BOX_BL = "\u255a"  # ╚
-BOX_BR = "\u255d"  # ╝
-BOX_H = "\u2550"   # ═
-BOX_V = "\u2551"   # ║
-
 # Spinner frames
 SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 
@@ -68,21 +60,15 @@ def center(text, width=None):
 
 def print_banner():
     """Print the purple ASCII banner using stdlib only."""
-    width = min(get_terminal_width(), 60)
-    inner_width = width - 4  # Account for borders and padding
-
     title = "Voice Synthesizer"
     subtitle = "Email data preparation for GPT fine-tuning"
     version = f"v{VERSION}"
 
     print()
-    print(center(f"{PURPLE}{BOX_TL}{BOX_H * (width - 2)}{BOX_TR}{RESET}"))
-    print(center(f"{PURPLE}{BOX_V}{RESET}{' ' * (width - 2)}{PURPLE}{BOX_V}{RESET}"))
-    print(center(f"{PURPLE}{BOX_V}{RESET}{BOLD}{PURPLE}{title.center(width - 2)}{RESET}{PURPLE}{BOX_V}{RESET}"))
-    print(center(f"{PURPLE}{BOX_V}{RESET}{DIM}{subtitle.center(width - 2)}{RESET}{PURPLE}{BOX_V}{RESET}"))
-    print(center(f"{PURPLE}{BOX_V}{RESET}{DIM}{version.center(width - 2)}{RESET}{PURPLE}{BOX_V}{RESET}"))
-    print(center(f"{PURPLE}{BOX_V}{RESET}{' ' * (width - 2)}{PURPLE}{BOX_V}{RESET}"))
-    print(center(f"{PURPLE}{BOX_BL}{BOX_H * (width - 2)}{BOX_BR}{RESET}"))
+    print()
+    print(center(f"{BOLD}{PURPLE}{title}{RESET}"))
+    print(center(f"{DIM}{subtitle}{RESET}"))
+    print(center(f"{DIM}{version}{RESET}"))
     print()
 
 
