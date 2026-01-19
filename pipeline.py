@@ -186,8 +186,8 @@ def import_mbox_single(
     for message in mbox:
         total += 1
 
-        if not quiet and total % 500 == 0:
-            print(f"      Processed {total} messages...")
+        if not quiet and total % 100 == 0:
+            print(f"      Processed {total} messages...", flush=True)
 
         try:
             # Gmail-specific: get labels early to filter spam/trash
@@ -746,8 +746,8 @@ def clean_emails(
     for rec in iter_records(input_path):
         stats["total"] += 1
 
-        if not quiet and stats["total"] % 500 == 0:
-            print(f"      {stats['total']:,} scanned, {len(results):,} kept...")
+        if not quiet and stats["total"] % 100 == 0:
+            print(f"      {stats['total']:,} scanned, {len(results):,} kept...", flush=True)
 
         # Sender filter
         sender_raw = get_field(rec, "From", "from", "Sender", "sender", "emailFrom", "email_from")
@@ -1331,7 +1331,7 @@ def main():
             print(json.dumps(results, indent=2, default=str))
 
     elif args.command == "import":
-        results = import_mbox(args.input, args.out, quiet=getattr(args, 'json_stats', False))
+        results = import_mbox(args.input, args.out, quiet=False)
         if getattr(args, 'json_stats', False):
             print(json.dumps(results))
         elif results['imported'] > 0:
@@ -1340,14 +1340,14 @@ def main():
             print(f"📄 Output: {results['output']}")
 
     elif args.command == "convert":
-        results = convert_to_jsonl(args.input, args.out, not args.no_filter, quiet=getattr(args, 'json_stats', False))
+        results = convert_to_jsonl(args.input, args.out, not args.no_filter, quiet=False)
         if getattr(args, 'json_stats', False):
             print(json.dumps(results))
         else:
             print(f"Done. Output: {results['output']}")
 
     elif args.command == "clean":
-        results = clean_emails(args.input, args.out, args.sender, args.years, quiet=getattr(args, 'json_stats', False))
+        results = clean_emails(args.input, args.out, args.sender, args.years, quiet=False)
         if getattr(args, 'json_stats', False):
             print(json.dumps(results))
         else:
@@ -1359,7 +1359,7 @@ def main():
             args.input, args.out, args.per_topic, args.min_chars,
             dedupe=not args.no_dedupe,
             dedupe_threshold=args.dedupe_threshold,
-            quiet=getattr(args, 'json_stats', False)
+            quiet=False
         )
         if getattr(args, 'json_stats', False):
             print(json.dumps(results))
