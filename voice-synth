@@ -12,7 +12,7 @@ import sys
 import time
 from pathlib import Path
 
-VERSION = "0.3.1-alpha"
+VERSION = "0.4.0-alpha"
 
 # Colors (ANSI escape codes - stdlib only, no deps needed)
 PURPLE = "\033[38;5;99m"
@@ -152,11 +152,11 @@ def check_spacy_model():
 
 
 def install_lightweight_deps():
-    """Install lightweight dependencies (questionary, rich, ijson, datasketch)."""
+    """Install lightweight dependencies (textual, rich, ijson, datasketch)."""
     packages = []
 
-    if not check_import("questionary"):
-        packages.append("questionary>=2.0.0")
+    if not check_import("textual"):
+        packages.append("textual>=1.0.0")
     if not check_import("rich"):
         packages.append("rich>=13.0.0")
     if not check_import("ijson"):
@@ -269,7 +269,7 @@ def check_all_deps():
         return False
 
     checks = [
-        check_import("questionary"),
+        check_import("textual"),
         check_import("rich"),
         check_import("ijson"),
         check_import("datasketch"),
@@ -334,8 +334,8 @@ def run_cli_mode(args):
     os.execv(str(PYTHON), [str(PYTHON), str(pipeline_path)] + args)
 
 
-def run_tui_mode():
-    """Run in interactive TUI mode."""
+def run_tui_with_tty():
+    """Launch the TUI with stdin from /dev/tty (called as subprocess)."""
     # Clear screen and show banner during setup
     print("\033[2J\033[H", end="")  # Clear screen
     print_banner()
@@ -345,14 +345,42 @@ def run_tui_mode():
         print(f"\n  {YELLOW}!{RESET} Setup failed. Please check your Python installation.")
         sys.exit(1)
 
-    # Run the simple questionary-based TUI
+    # Run the Textual TUI
     tui_path = SCRIPT_DIR / "tui.py"
     os.execv(str(PYTHON), [str(PYTHON), str(tui_path)])
+
+
+def run_tui_mode():
+    """Run in interactive TUI mode, handling piped stdin."""
+    # Check if stdin is piped (e.g., curl | bash)
+    if not sys.__stdin__.isatty():
+        # Stdin is piped - launch subprocess with /dev/tty
+        try:
+            with open("/dev/tty", "rb", buffering=0) as tty_stdin:
+                # Re-run ourselves with stdin from the TTY
+                result = subprocess.run(
+                    [sys.executable, str(Path(__file__).resolve()), "--tui-internal"],
+                    stdin=tty_stdin,
+                    env={**os.environ, "TEXTUAL_ALLOW_SIGNALS": "1"}
+                )
+                sys.exit(result.returncode)
+        except FileNotFoundError:
+            print(f"{YELLOW}Error:{RESET} No terminal available for interactive mode.")
+            print(f"{DIM}Run './voice-synth' directly from a terminal.{RESET}")
+            sys.exit(1)
+    else:
+        # Normal execution - stdin is a terminal
+        run_tui_with_tty()
 
 
 def main():
     """Entry point."""
     args = sys.argv[1:]
+
+    # Internal flag for subprocess re-execution with TTY
+    if args == ["--tui-internal"]:
+        run_tui_with_tty()
+        return
 
     # CLI passthrough mode if arguments provided
     if args:

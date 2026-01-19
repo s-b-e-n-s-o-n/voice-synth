@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Simple TUI for Voice Synthesizer using questionary + rich.
+Textual TUI for Voice Synthesizer.
 """
 
 import json
@@ -11,65 +11,22 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-import questionary
-from questionary import Style
-from rich.console import Console
-from rich.panel import Panel
-from rich.progress import Progress, SpinnerColumn, TextColumn
-from rich.table import Table
+from textual import work
+from textual.app import App, ComposeResult
+from textual.containers import Container, Vertical, Horizontal
+from textual.screen import Screen
+from textual.widgets import Header, Footer, Button, Static, Input, Label, DataTable, ProgressBar
+from textual.binding import Binding
 
 # Add script dir to path for pipeline import
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-console = Console()
-
-# Custom style matching the purple/green aesthetic
-custom_style = Style([
-    ('qmark', 'fg:#673ab7 bold'),
-    ('question', 'bold'),
-    ('answer', 'fg:#00ff7f bold'),
-    ('pointer', 'fg:#673ab7 bold'),
-    ('highlighted', 'fg:#673ab7 bold'),
-    ('selected', 'fg:#00ff7f'),
-])
-
 # Paths
 CACHE_DIR = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "voice-synth"
 JOBS_FILE = CACHE_DIR / "jobs.json"
-VERSION = "0.3.1-alpha"
-
-
-def clear_screen():
-    """Clear terminal screen."""
-    console.clear()
-
-
-def show_header():
-    """Display the app header."""
-    console.print()
-    console.print(Panel(
-        "[bold #673ab7]Voice Synthesizer[/]\n"
-        "[dim]Email data preparation for GPT fine-tuning[/]\n"
-        f"[dim italic]v{VERSION}[/]",
-        border_style="#673ab7",
-        padding=(1, 4),
-    ))
-    console.print()
-
-
-def clean_path(raw_path: str) -> str:
-    """Clean drag-and-drop path."""
-    path = raw_path.strip()
-    if (path.startswith("'") and path.endswith("'")) or \
-       (path.startswith('"') and path.endswith('"')):
-        path = path[1:-1]
-    path = path.replace("\\ ", " ")
-    if path.startswith("file://"):
-        from urllib.parse import unquote
-        path = unquote(path[7:])
-    return os.path.expanduser(path).strip()
+VERSION = "0.4.0-alpha"
 
 
 # =============================================================================
@@ -82,7 +39,7 @@ def load_jobs():
         return []
     try:
         return json.loads(JOBS_FILE.read_text())
-    except:
+    except Exception:
         return []
 
 
@@ -148,342 +105,591 @@ def mark_job_complete(work_dir: str):
     JOBS_FILE.write_text(json.dumps(jobs, indent=2))
 
 
+def clean_path(raw_path: str) -> str:
+    """Clean drag-and-drop path."""
+    path = raw_path.strip()
+    if (path.startswith("'") and path.endswith("'")) or \
+       (path.startswith('"') and path.endswith('"')):
+        path = path[1:-1]
+    path = path.replace("\\ ", " ")
+    if path.startswith("file://"):
+        from urllib.parse import unquote
+        path = unquote(path[7:])
+    return os.path.expanduser(path).strip()
+
+
 # =============================================================================
-# Pipeline Screens
+# CSS Styles
 # =============================================================================
 
-def pick_file() -> Optional[str]:
-    """File picker screen."""
-    clear_screen()
-    show_header()
+CSS = """
+Screen {
+    background: $surface;
+}
 
-    console.print("[bold #673ab7]Select Input File[/]")
-    console.print("[dim]Drop your Google Takeout export (.mbox, folder, or .zip)[/]")
-    console.print("[dim italic]Drag from Finder into this window, then press Enter[/]")
-    console.print()
+#main-container {
+    width: 100%;
+    height: 100%;
+    align: center middle;
+}
 
-    raw_path = questionary.text(
-        "File path:",
-        style=custom_style,
-    ).ask()
+.menu-container {
+    width: 60;
+    height: auto;
+    padding: 1 2;
+    border: double $primary;
+    background: $surface;
+}
 
-    if raw_path is None:  # Ctrl+C
-        return None
+.title {
+    text-align: center;
+    text-style: bold;
+    color: $primary;
+    padding: 1 0;
+}
 
-    path = clean_path(raw_path)
+.subtitle {
+    text-align: center;
+    color: $text-muted;
+    padding: 0 0 1 0;
+}
 
-    if not os.path.exists(path):
-        console.print(f"[red]File not found: {path}[/]")
-        questionary.press_any_key_to_continue(style=custom_style).ask()
-        return pick_file()
+.menu-button {
+    width: 100%;
+    margin: 1 0 0 0;
+}
 
-    return os.path.abspath(path)
+.menu-button:focus {
+    background: $primary;
+}
+
+#file-input {
+    width: 100%;
+    margin: 1 0;
+}
+
+.help-text {
+    color: $text-muted;
+    text-align: center;
+    padding: 1 0;
+}
+
+.error-text {
+    color: $error;
+    text-align: center;
+    padding: 1 0;
+}
+
+.success-text {
+    color: $success;
+    text-align: center;
+    padding: 1 0;
+}
+
+#progress-container {
+    width: 80;
+    height: auto;
+    padding: 2;
+    border: double $primary;
+    background: $surface;
+}
+
+.stage-item {
+    padding: 0 1;
+}
+
+.stage-pending {
+    color: $text-muted;
+}
+
+.stage-running {
+    color: $warning;
+}
+
+.stage-complete {
+    color: $success;
+}
+
+.stage-error {
+    color: $error;
+}
+
+#results-container {
+    width: 80;
+    height: auto;
+    padding: 2;
+    border: double $success;
+    background: $surface;
+}
+"""
 
 
-def pick_sender(input_file: str) -> Optional[str]:
-    """Sender filter screen with auto-detection."""
-    clear_screen()
-    show_header()
+# =============================================================================
+# Screens
+# =============================================================================
 
-    console.print("[bold #673ab7]Sender Filter[/]")
-    console.print("[dim]Filter to emails you wrote (not received)[/]")
-    console.print()
+class MainMenuScreen(Screen):
+    """Main menu screen."""
 
-    # Try to detect owner email
-    detected = None
-    try:
-        from pipeline import detect_owner_email
-        with console.status("[#673ab7]Detecting your email address...[/]"):
-            detected = detect_owner_email(input_file)
-    except:
-        pass
+    BINDINGS = [
+        Binding("q", "quit", "Quit"),
+        Binding("escape", "quit", "Quit"),
+    ]
 
-    if detected:
-        console.print(f"[green]Detected: {detected}[/]")
-        console.print()
-
-        choice = questionary.select(
-            "Use this email?",
-            choices=[
-                f"Yes, use {detected}",
-                "Enter a different email",
-                "No filter (keep all senders)",
-            ],
-            style=custom_style,
-        ).ask()
-
-        if choice is None:
-            return None
-        if choice.startswith("Yes"):
-            return detected
-        elif choice.startswith("Enter"):
-            return questionary.text("Email address:", default=detected, style=custom_style).ask()
-        else:
-            return ""
-    else:
-        console.print("[dim]Could not auto-detect email.[/]")
-        console.print()
-
-        choice = questionary.select(
-            "Filter by sender?",
-            choices=[
-                "Enter email address",
-                "No filter (keep all senders)",
-            ],
-            style=custom_style,
-        ).ask()
-
-        if choice is None:
-            return None
-        if choice.startswith("Enter"):
-            return questionary.text("Email address:", style=custom_style).ask()
-        return ""
-
-
-def run_pipeline(input_file: str, sender: Optional[str], work_dir: str) -> Optional[dict]:
-    """Run the pipeline with progress display."""
-    clear_screen()
-    show_header()
-
-    console.print("[bold #673ab7]Processing Emails[/]")
-    console.print("[dim italic]This may take a few minutes for large mailboxes[/]")
-    console.print()
-
-    # Save job
-    save_job(input_file, work_dir, "in_progress", sender)
-
-    original_dir = os.getcwd()
-    os.chdir(work_dir)
-
-    try:
-        from pipeline import (
-            import_mbox, convert_to_jsonl, clean_emails, build_shortlist,
-            needs_mbox_import
+    def compose(self) -> ComposeResult:
+        yield Container(
+            Vertical(
+                Static("Voice Synthesizer", classes="title"),
+                Static(f"Email data preparation for GPT fine-tuning\nv{VERSION}", classes="subtitle"),
+                Button("Get Started", id="btn-start", classes="menu-button", variant="primary"),
+                Button("Help", id="btn-help", classes="menu-button"),
+                Button("Uninstall", id="btn-uninstall", classes="menu-button"),
+                Button("Quit", id="btn-quit", classes="menu-button"),
+                classes="menu-container",
+            ),
+            id="main-container",
         )
 
-        results = {}
+    def on_mount(self) -> None:
+        # Check for incomplete jobs
+        incomplete = get_incomplete_job()
+        if incomplete:
+            mbox_name = os.path.basename(incomplete.get('mbox', 'unknown'))
+            # Insert resume button at the top
+            container = self.query_one(".menu-container")
+            resume_btn = Button(f"Resume ({mbox_name})", id="btn-resume", classes="menu-button", variant="success")
+            container.mount(resume_btn, after=self.query_one(".subtitle"))
+            self.app.incomplete_job = incomplete
 
-        with Progress(
-            SpinnerColumn(style="#673ab7"),
-            TextColumn("[progress.description]{task.description}"),
-            console=console,
-        ) as progress:
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn-start":
+            self.app.push_screen(FilePickerScreen())
+        elif event.button.id == "btn-resume":
+            job = getattr(self.app, 'incomplete_job', None)
+            if job:
+                self.app.input_file = job.get('mbox', '')
+                self.app.sender = job.get('sender', '')
+                self.app.work_dir = job.get('work_dir', os.getcwd())
+                self.app.push_screen(ProgressScreen())
+        elif event.button.id == "btn-help":
+            self.app.push_screen(HelpScreen())
+        elif event.button.id == "btn-uninstall":
+            self.app.push_screen(UninstallScreen())
+        elif event.button.id == "btn-quit":
+            self.app.exit()
+
+    def action_quit(self) -> None:
+        self.app.exit()
+
+
+class FilePickerScreen(Screen):
+    """File picker screen."""
+
+    BINDINGS = [
+        Binding("escape", "back", "Back"),
+    ]
+
+    def compose(self) -> ComposeResult:
+        yield Container(
+            Vertical(
+                Static("Select Input File", classes="title"),
+                Static("Drop your Google Takeout export (.mbox, folder, or .zip)", classes="subtitle"),
+                Input(placeholder="Drag file here or type path...", id="file-input"),
+                Static("Drag from Finder into this window, then press Enter", classes="help-text"),
+                Static("", id="error-msg", classes="error-text"),
+                Horizontal(
+                    Button("Back", id="btn-back"),
+                    Button("Continue", id="btn-continue", variant="primary"),
+                ),
+                classes="menu-container",
+            ),
+            id="main-container",
+        )
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        self._validate_and_continue()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn-back":
+            self.app.pop_screen()
+        elif event.button.id == "btn-continue":
+            self._validate_and_continue()
+
+    def _validate_and_continue(self) -> None:
+        raw_path = self.query_one("#file-input", Input).value
+        if not raw_path:
+            self.query_one("#error-msg", Static).update("Please enter a file path")
+            return
+
+        path = clean_path(raw_path)
+
+        if not os.path.exists(path):
+            self.query_one("#error-msg", Static).update(f"File not found: {path}")
+            return
+
+        self.app.input_file = os.path.abspath(path)
+        self.app.push_screen(SenderFilterScreen())
+
+    def action_back(self) -> None:
+        self.app.pop_screen()
+
+
+class SenderFilterScreen(Screen):
+    """Sender filter screen."""
+
+    BINDINGS = [
+        Binding("escape", "back", "Back"),
+    ]
+
+    def compose(self) -> ComposeResult:
+        yield Container(
+            Vertical(
+                Static("Sender Filter", classes="title"),
+                Static("Filter to emails you wrote (not received)", classes="subtitle"),
+                Static("Detecting your email address...", id="detect-status", classes="help-text"),
+                Input(placeholder="Enter email address...", id="sender-input"),
+                Horizontal(
+                    Button("Skip (no filter)", id="btn-skip"),
+                    Button("Continue", id="btn-continue", variant="primary"),
+                ),
+                classes="menu-container",
+            ),
+            id="main-container",
+        )
+
+    def on_mount(self) -> None:
+        self._detect_owner()
+
+    @work(thread=True)
+    def _detect_owner(self) -> None:
+        """Try to detect owner email."""
+        try:
+            from pipeline import detect_owner_email
+            detected = detect_owner_email(self.app.input_file)
+            if detected:
+                self.call_from_thread(self._set_detected, detected)
+            else:
+                self.call_from_thread(self._set_not_detected)
+        except Exception:
+            self.call_from_thread(self._set_not_detected)
+
+    def _set_detected(self, email: str) -> None:
+        self.query_one("#detect-status", Static).update(f"Detected: {email}")
+        self.query_one("#sender-input", Input).value = email
+
+    def _set_not_detected(self) -> None:
+        self.query_one("#detect-status", Static).update("Could not auto-detect email")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn-skip":
+            self.app.sender = ""
+            self.app.work_dir = os.getcwd()
+            self.app.push_screen(ProgressScreen())
+        elif event.button.id == "btn-continue":
+            self.app.sender = self.query_one("#sender-input", Input).value
+            self.app.work_dir = os.getcwd()
+            self.app.push_screen(ProgressScreen())
+
+    def action_back(self) -> None:
+        self.app.pop_screen()
+
+
+class ProgressScreen(Screen):
+    """Pipeline progress screen."""
+
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel"),
+    ]
+
+    def compose(self) -> ComposeResult:
+        yield Container(
+            Vertical(
+                Static("Processing Emails", classes="title"),
+                Static("This may take a few minutes for large mailboxes", classes="subtitle"),
+                Static("○ Import MBOX", id="stage-import", classes="stage-item stage-pending"),
+                Static("○ Convert to JSONL", id="stage-convert", classes="stage-item stage-pending"),
+                Static("○ Clean & anonymize", id="stage-clean", classes="stage-item stage-pending"),
+                Static("○ Curate shortlist", id="stage-curate", classes="stage-item stage-pending"),
+                Static("", id="status-msg", classes="help-text"),
+                id="progress-container",
+            ),
+            id="main-container",
+        )
+
+    def on_mount(self) -> None:
+        self._run_pipeline()
+
+    @work(thread=True)
+    def _run_pipeline(self) -> None:
+        """Run the pipeline stages."""
+        input_file = self.app.input_file
+        sender = self.app.sender
+        work_dir = self.app.work_dir
+
+        # Save job
+        save_job(input_file, work_dir, "in_progress", sender)
+
+        original_dir = os.getcwd()
+        os.chdir(work_dir)
+
+        try:
+            from pipeline import (
+                import_mbox, convert_to_jsonl, clean_emails, build_shortlist,
+                needs_mbox_import
+            )
+
+            results = {}
 
             # Stage 0: Import
             if needs_mbox_import(input_file):
-                task = progress.add_task("Importing MBOX...", total=None)
+                self.call_from_thread(self._update_stage, "import", "running")
                 results["import"] = import_mbox(input_file, "emails_raw.json", quiet=True)
-                progress.update(task, description=f"[green]✓[/] Imported {results['import'].get('imported', 0):,} emails")
-                progress.stop_task(task)
+                self.call_from_thread(self._update_stage, "import", "complete",
+                                      f"Imported {results['import'].get('imported', 0):,} emails")
                 input_file = "emails_raw.json"
+            else:
+                self.call_from_thread(self._update_stage, "import", "complete", "Skipped (not MBOX)")
 
             # Stage 1: Convert
-            task = progress.add_task("Converting to JSONL...", total=None)
+            self.call_from_thread(self._update_stage, "convert", "running")
             results["convert"] = convert_to_jsonl(input_file, "emails.jsonl", quiet=True)
-            progress.update(task, description=f"[green]✓[/] Converted {results['convert'].get('kept', 0):,} records")
-            progress.stop_task(task)
+            self.call_from_thread(self._update_stage, "convert", "complete",
+                                  f"Converted {results['convert'].get('kept', 0):,} records")
 
             # Stage 2: Clean
-            task = progress.add_task("Cleaning & anonymizing...", total=None)
+            self.call_from_thread(self._update_stage, "clean", "running")
             results["clean"] = clean_emails("emails.jsonl", "cleaned_emails.json", sender or None, quiet=True)
-            progress.update(task, description=f"[green]✓[/] Cleaned {results['clean'].get('kept', 0):,} emails")
-            progress.stop_task(task)
+            self.call_from_thread(self._update_stage, "clean", "complete",
+                                  f"Cleaned {results['clean'].get('kept', 0):,} emails")
 
             # Stage 3: Curate
-            task = progress.add_task("Curating shortlist...", total=None)
+            self.call_from_thread(self._update_stage, "curate", "running")
             results["curate"] = build_shortlist("cleaned_emails.json", "style_shortlist.csv", quiet=True)
-            progress.update(task, description=f"[green]✓[/] Selected {results['curate'].get('shortlisted', 0):,} emails")
-            progress.stop_task(task)
+            self.call_from_thread(self._update_stage, "curate", "complete",
+                                  f"Selected {results['curate'].get('shortlisted', 0):,} emails")
 
-        # Copy to Desktop
-        desktop = Path.home() / "Desktop" / "style_shortlist.csv"
-        try:
-            shutil.copy("style_shortlist.csv", desktop)
-            results["desktop_path"] = str(desktop)
-        except:
-            results["desktop_path"] = os.path.abspath("style_shortlist.csv")
+            # Copy to Desktop
+            desktop = Path.home() / "Desktop" / "style_shortlist.csv"
+            try:
+                shutil.copy("style_shortlist.csv", desktop)
+                results["desktop_path"] = str(desktop)
+            except Exception:
+                results["desktop_path"] = os.path.abspath("style_shortlist.csv")
 
-        mark_job_complete(work_dir)
-        return results
+            mark_job_complete(work_dir)
+            self.app.results = results
+            self.call_from_thread(self._show_results)
 
-    except Exception as e:
-        console.print(f"\n[red]Error: {e}[/]")
-        questionary.press_any_key_to_continue(style=custom_style).ask()
-        return None
+        except Exception as e:
+            self.call_from_thread(self._show_error, str(e))
 
-    finally:
-        os.chdir(original_dir)
+        finally:
+            os.chdir(original_dir)
 
+    def _update_stage(self, stage: str, status: str, msg: str = "") -> None:
+        widget = self.query_one(f"#stage-{stage}", Static)
+        if status == "running":
+            widget.update(f"◐ {widget.renderable.plain[2:]}")
+            widget.set_classes("stage-item stage-running")
+        elif status == "complete":
+            label = msg or widget.renderable.plain[2:]
+            widget.update(f"✓ {label}")
+            widget.set_classes("stage-item stage-complete")
+        elif status == "error":
+            widget.update(f"✗ {msg or 'Error'}")
+            widget.set_classes("stage-item stage-error")
 
-def show_results(results: dict):
-    """Display pipeline results."""
-    clear_screen()
-    show_header()
+    def _show_results(self) -> None:
+        self.app.push_screen(ResultsScreen())
 
-    console.print("[bold green]Processing Complete![/]")
-    console.print()
+    def _show_error(self, error: str) -> None:
+        self.query_one("#status-msg", Static).update(f"Error: {error}")
 
-    # Output path
-    desktop_path = results.get("desktop_path", "style_shortlist.csv")
-    if "Desktop" in str(desktop_path):
-        console.print("[green]Output saved to: ~/Desktop/style_shortlist.csv[/]")
-    else:
-        console.print(f"[green]Output saved to: {desktop_path}[/]")
-    console.print()
-
-    # Results table
-    table = Table(border_style="#673ab7")
-    table.add_column("Stage", style="bold")
-    table.add_column("Input", justify="right")
-    table.add_column("Output", justify="right")
-    table.add_column("Filtered", justify="right")
-
-    if "import" in results:
-        imp = results["import"]
-        table.add_row("Import", f"{imp.get('total', 0):,}", f"{imp.get('imported', 0):,}", f"{imp.get('skipped', 0):,}")
-
-    if "convert" in results:
-        conv = results["convert"]
-        table.add_row("Convert", f"{conv.get('total', 0):,}", f"{conv.get('kept', 0):,}", f"{conv.get('total', 0) - conv.get('kept', 0):,}")
-
-    if "clean" in results:
-        clean = results["clean"]
-        table.add_row("Clean", f"{clean.get('total', 0):,}", f"{clean.get('kept', 0):,}", f"{clean.get('total', 0) - clean.get('kept', 0):,}")
-
-    if "curate" in results:
-        curate = results["curate"]
-        table.add_row("Curate", f"{curate.get('total_input', 0):,}", f"[bold green]{curate.get('shortlisted', 0):,}[/]", f"{curate.get('total_input', 0) - curate.get('shortlisted', 0):,}")
-
-    console.print(table)
-    console.print()
-    console.print("[dim italic]Open the CSV in a spreadsheet to review your emails[/]")
-    console.print()
-
-    questionary.press_any_key_to_continue(style=custom_style).ask()
+    def action_cancel(self) -> None:
+        # TODO: Actually cancel the worker
+        self.app.pop_screen()
 
 
-def show_help():
-    """Display help."""
-    clear_screen()
-    show_header()
+class ResultsScreen(Screen):
+    """Results display screen."""
 
-    console.print("""[bold #673ab7]Pipeline Stages[/]
+    BINDINGS = [
+        Binding("enter", "done", "Done"),
+        Binding("escape", "done", "Done"),
+    ]
+
+    def compose(self) -> ComposeResult:
+        yield Container(
+            Vertical(
+                Static("Processing Complete!", classes="title success-text"),
+                Static("", id="output-path", classes="help-text"),
+                DataTable(id="results-table"),
+                Static("Open the CSV in a spreadsheet to review your emails", classes="help-text"),
+                Button("Done", id="btn-done", variant="success"),
+                id="results-container",
+            ),
+            id="main-container",
+        )
+
+    def on_mount(self) -> None:
+        results = getattr(self.app, 'results', {})
+
+        # Show output path
+        desktop_path = results.get("desktop_path", "style_shortlist.csv")
+        if "Desktop" in str(desktop_path):
+            self.query_one("#output-path", Static).update("Output: ~/Desktop/style_shortlist.csv")
+        else:
+            self.query_one("#output-path", Static).update(f"Output: {desktop_path}")
+
+        # Build results table
+        table = self.query_one("#results-table", DataTable)
+        table.add_columns("Stage", "Input", "Output", "Filtered")
+
+        if "import" in results:
+            imp = results["import"]
+            table.add_row("Import", f"{imp.get('total', 0):,}", f"{imp.get('imported', 0):,}", f"{imp.get('skipped', 0):,}")
+
+        if "convert" in results:
+            conv = results["convert"]
+            table.add_row("Convert", f"{conv.get('total', 0):,}", f"{conv.get('kept', 0):,}",
+                         f"{conv.get('total', 0) - conv.get('kept', 0):,}")
+
+        if "clean" in results:
+            clean = results["clean"]
+            table.add_row("Clean", f"{clean.get('total', 0):,}", f"{clean.get('kept', 0):,}",
+                         f"{clean.get('total', 0) - clean.get('kept', 0):,}")
+
+        if "curate" in results:
+            curate = results["curate"]
+            table.add_row("Curate", f"{curate.get('total_input', 0):,}", f"{curate.get('shortlisted', 0):,}",
+                         f"{curate.get('total_input', 0) - curate.get('shortlisted', 0):,}")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn-done":
+            self.app.exit()
+
+    def action_done(self) -> None:
+        self.app.exit()
+
+
+class HelpScreen(Screen):
+    """Help screen."""
+
+    BINDINGS = [
+        Binding("escape", "back", "Back"),
+    ]
+
+    def compose(self) -> ComposeResult:
+        help_text = """[bold]Pipeline Stages[/]
 
 [bold]0. Import[/]   - Import MBOX from Google Takeout, strip attachments
 [bold]1. Convert[/]  - Convert JSON to JSONL, filter unsafe fields
 [bold]2. Clean[/]    - Anonymize PII with Presidio, remove signatures
 [bold]3. Curate[/]   - Score by richness, group by topic, output CSV
 
-[bold #673ab7]Quick Start[/]
+[bold]Quick Start[/]
 
-1. Go to [link]https://takeout.google.com[/link]
-2. Select [bold]only Mail[/] → Export as [bold]MBOX[/]
+1. Go to https://takeout.google.com
+2. Select only Mail → Export as MBOX
 3. Run this tool and select your .mbox file
-4. Enter your email to filter to emails [bold]you wrote[/]
+4. Enter your email to filter to emails you wrote
 5. Review style_shortlist.csv in a spreadsheet
 
-[bold #673ab7]CLI Usage[/]
+[bold]CLI Usage[/]
 
-[dim]./voice-synth run <file> --sender <email>[/]
+./voice-synth run <file> --sender <email>
 
-[bold #673ab7]Files[/]
+[bold]Files[/]
 
-Dependencies: ~/.cache/voice-synth/venv/
-""")
+Dependencies: ~/.cache/voice-synth/venv/"""
 
-    questionary.press_any_key_to_continue(style=custom_style).ask()
+        yield Container(
+            Vertical(
+                Static("Help", classes="title"),
+                Static(help_text, classes="help-text"),
+                Button("Back", id="btn-back"),
+                classes="menu-container",
+            ),
+            id="main-container",
+        )
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn-back":
+            self.app.pop_screen()
+
+    def action_back(self) -> None:
+        self.app.pop_screen()
 
 
-def do_uninstall():
-    """Uninstall dialog."""
-    clear_screen()
-    show_header()
+class UninstallScreen(Screen):
+    """Uninstall confirmation screen."""
 
-    console.print("[bold #673ab7]Uninstall[/]")
-    console.print()
-    console.print(f"This will delete: [dim]{CACHE_DIR}[/]")
-    console.print()
+    BINDINGS = [
+        Binding("escape", "back", "Back"),
+    ]
 
-    if questionary.confirm("Delete everything and uninstall?", default=False, style=custom_style).ask():
-        try:
-            if CACHE_DIR.exists():
-                shutil.rmtree(CACHE_DIR)
-            console.print("[green]✓ Uninstalled successfully[/]")
-            console.print("[dim]Run ./voice-synth to reinstall.[/]")
-            sys.exit(0)
-        except Exception as e:
-            console.print(f"[red]Error: {e}[/]")
+    def compose(self) -> ComposeResult:
+        yield Container(
+            Vertical(
+                Static("Uninstall", classes="title"),
+                Static(f"This will delete: {CACHE_DIR}", classes="help-text"),
+                Horizontal(
+                    Button("Cancel", id="btn-cancel"),
+                    Button("Delete Everything", id="btn-confirm", variant="error"),
+                ),
+                classes="menu-container",
+            ),
+            id="main-container",
+        )
 
-    questionary.press_any_key_to_continue(style=custom_style).ask()
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn-cancel":
+            self.app.pop_screen()
+        elif event.button.id == "btn-confirm":
+            try:
+                if CACHE_DIR.exists():
+                    shutil.rmtree(CACHE_DIR)
+                self.app.exit(message="Uninstalled successfully. Run ./voice-synth to reinstall.")
+            except Exception as e:
+                self.notify(f"Error: {e}", severity="error")
+
+    def action_back(self) -> None:
+        self.app.pop_screen()
 
 
 # =============================================================================
-# Main Menu
+# Main App
 # =============================================================================
 
-def main_menu():
-    """Main menu loop."""
-    while True:
-        clear_screen()
-        show_header()
+class VoiceSynthApp(App):
+    """Voice Synthesizer TUI Application."""
 
-        # Check for incomplete jobs
-        incomplete = get_incomplete_job()
+    CSS = CSS
+    TITLE = "Voice Synthesizer"
 
-        choices = []
-        if incomplete:
-            mbox_name = os.path.basename(incomplete.get('mbox', 'unknown'))
-            choices.append(f"Continue previous ({mbox_name})")
-        choices.extend(["Get started", "Help", "Uninstall", "Quit"])
+    BINDINGS = [
+        Binding("q", "quit", "Quit", show=False),
+        Binding("ctrl+c", "quit", "Quit", show=False),
+    ]
 
-        choice = questionary.select(
-            "What would you like to do?",
-            choices=choices,
-            style=custom_style,
-        ).ask()
+    # State
+    input_file: str = ""
+    sender: str = ""
+    work_dir: str = ""
+    results: dict = {}
+    incomplete_job: Optional[dict] = None
 
-        if choice is None or choice == "Quit":
-            console.print("\n[dim]Goodbye![/]\n")
-            break
+    def on_mount(self) -> None:
+        self.push_screen(MainMenuScreen())
 
-        elif choice.startswith("Continue"):
-            # Resume incomplete job
-            work_dir = incomplete.get('work_dir', os.getcwd())
-            input_file = incomplete.get('mbox', '')
-            sender = incomplete.get('sender', '')
-
-            os.chdir(work_dir)
-            results = run_pipeline(input_file, sender, work_dir)
-            if results:
-                show_results(results)
-
-        elif choice == "Get started":
-            input_file = pick_file()
-            if input_file is None:
-                continue
-
-            sender = pick_sender(input_file)
-            if sender is None:
-                continue
-
-            work_dir = os.getcwd()
-            results = run_pipeline(input_file, sender, work_dir)
-            if results:
-                show_results(results)
-
-        elif choice == "Help":
-            show_help()
-
-        elif choice == "Uninstall":
-            do_uninstall()
+    def action_quit(self) -> None:
+        self.exit()
 
 
 def main():
     """Entry point."""
-    try:
-        main_menu()
-    except KeyboardInterrupt:
-        console.print("\n[dim]Goodbye![/]\n")
+    app = VoiceSynthApp()
+    app.run()
 
 
 if __name__ == "__main__":

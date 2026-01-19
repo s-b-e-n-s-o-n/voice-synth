@@ -1,9 +1,9 @@
 # Voice Synthesizer Dependencies
 
-# Interactive prompts
-questionary>=2.0.0
+# Textual TUI framework
+textual>=1.0.0
 
-# Rich text formatting
+# Rich text formatting (required by Textual)
 rich>=13.0.0
 
 # Streaming JSON parser for large files
