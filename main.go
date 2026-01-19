@@ -1022,9 +1022,29 @@ func runPipelineStage(inputFile, sender, workDir string, s stage) tea.Cmd {
 		// Wait for command to finish
 		err = cmd.Wait()
 		if err != nil {
+			// Log full error details for debugging
+			logFile := filepath.Join(getCacheDir(), "error.log")
+			logContent := fmt.Sprintf("Stage: %d\nCommand: %s %v\nWorkDir: %s\nExit: %v\nOutput:\n%s\n",
+				s, python, args, workDir, err, allOutput.String())
+			os.WriteFile(logFile, []byte(logContent), 0644)
+
+			// Try to show the most useful error info
 			errMsg := lastErr
 			if errMsg == "" {
-				errMsg = err.Error()
+				// No stderr, use last lines of stdout
+				lines := strings.Split(strings.TrimSpace(allOutput.String()), "\n")
+				if len(lines) > 0 {
+					// Get last non-empty line
+					for i := len(lines) - 1; i >= 0; i-- {
+						if lines[i] != "" && !strings.HasPrefix(lines[i], "{") {
+							errMsg = lines[i]
+							break
+						}
+					}
+				}
+			}
+			if errMsg == "" {
+				errMsg = fmt.Sprintf("%v (see ~/.cache/voice-synth/error.log)", err)
 			}
 			return stageErrorMsg{stage: s, err: fmt.Errorf("%s", errMsg)}
 		}

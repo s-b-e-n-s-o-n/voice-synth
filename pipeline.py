@@ -191,7 +191,7 @@ def import_mbox_single(
 
         try:
             # Gmail-specific: get labels early to filter spam/trash
-            labels = message.get("X-Gmail-Labels", "")
+            labels = str(message.get("X-Gmail-Labels", "") or "")
             label_list = [l.strip().lower() for l in labels.split(",")]
 
             # Skip spam, trash, and drafts
@@ -199,13 +199,13 @@ def import_mbox_single(
                 spam_trash += 1
                 continue
 
-            # Extract headers
-            msg_id = message.get("Message-ID", "")
-            from_addr = message.get("From", "")
-            to_addr = message.get("To", "")
-            cc_addr = message.get("Cc", "")
-            subject = message.get("Subject", "")
-            date = message.get("Date", "")
+            # Extract headers (convert Header objects to strings)
+            msg_id = str(message.get("Message-ID", "") or "")
+            from_addr = str(message.get("From", "") or "")
+            to_addr = str(message.get("To", "") or "")
+            cc_addr = str(message.get("Cc", "") or "")
+            subject = str(message.get("Subject", "") or "")
+            date = str(message.get("Date", "") or "")
 
             # Filter by age early
             if date:
