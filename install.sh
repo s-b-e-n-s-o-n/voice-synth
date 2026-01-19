@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # voice-synth installer
-# One-liner: curl -sL https://raw.githubusercontent.com/s-b-e-n-s-o-n/voice-synth/feature/bubbletea-tui/install.sh | bash
+# One-liner: curl -sL https://raw.githubusercontent.com/s-b-e-n-s-o-n/voice-synth/main/install.sh | bash
 #
 set -e
 
@@ -46,7 +46,7 @@ fi
 
 INSTALL_DIR="$HOME/voice-synth"
 BINARY_URL="https://github.com/s-b-e-n-s-o-n/voice-synth/releases/download/v0.5.1-alpha/voice-synth-tui"
-PIPELINE_URL="https://raw.githubusercontent.com/s-b-e-n-s-o-n/voice-synth/feature/bubbletea-tui/pipeline.py"
+PIPELINE_URL="https://raw.githubusercontent.com/s-b-e-n-s-o-n/voice-synth/main/pipeline.py"
 
 # Create install directory
 mkdir -p "$INSTALL_DIR"
