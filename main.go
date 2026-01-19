@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +18,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
+
+// Global program reference for sending messages from goroutines
+var program *tea.Program
 
 const version = "0.5.1-alpha"
 
@@ -103,6 +108,7 @@ type (
 	stageErrorMsg       struct{ stage stage; err error }
 	pipelineCompleteMsg struct{ results map[string]map[string]int }
 	ownerDetectedMsg    struct{ email string }
+	logUpdateMsg        struct{ line string }
 	tickMsg             time.Time
 )
 
@@ -122,8 +128,8 @@ type model struct {
 	currentStage stage
 	stageStats   map[stage]map[string]int
 	results      map[string]map[string]int
-	failedStage  stage  // -1 if no failure
-	stageLog     string // Current stage output/progress
+	failedStage  stage    // -1 if no failure
+	logLines     []string // Rolling log output
 
 	// Setup state
 	setupStep       int
@@ -244,9 +250,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.statusMsg = fmt.Sprintf("Detected: %s", msg.email)
 		return m, nil
 
+	case logUpdateMsg:
+		// Add line to rolling log (keep last 8 lines)
+		m.logLines = append(m.logLines, msg.line)
+		if len(m.logLines) > 8 {
+			m.logLines = m.logLines[len(m.logLines)-8:]
+		}
+		return m, nil
+
 	case stageCompleteMsg:
 		m.stageStats[msg.stage] = msg.stats
 		m.currentStage = msg.stage + 1
+		m.logLines = nil // Clear log for next stage
 		if m.currentStage < stageDone {
 			return m, runPipelineStage(m.inputFile, m.sender, m.workDir, m.currentStage)
 		}
@@ -583,16 +598,31 @@ func (m model) viewProgress() string {
 		content += fmt.Sprintf("%s %s\n", icon, style.Render(text))
 	}
 
-	// Log/status area
+	// Log box - show rolling output
+	content += "\n"
+	logBoxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(dim).
+		Padding(0, 1).
+		Width(44).
+		Height(8)
+
+	var logContent string
 	if m.errMsg != "" {
-		content += "\n" + errorStyle.Render("Error: "+m.errMsg)
-		content += "\n\n" + dimStyle.Render("esc to go back")
-	} else if m.stageLog != "" {
-		content += "\n" + dimStyle.Render(m.stageLog)
+		logContent = errorStyle.Render("Error: " + m.errMsg)
+	} else if len(m.logLines) > 0 {
+		logContent = dimStyle.Render(strings.Join(m.logLines, "\n"))
+	} else {
+		logContent = dimStyle.Render("Waiting for output...")
+	}
+	content += logBoxStyle.Render(logContent)
+
+	if m.errMsg != "" {
+		content += "\n" + dimStyle.Render("esc to go back")
 	}
 
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
-		menuStyle.Render(content))
+		menuStyle.Width(55).Render(content))
 }
 
 func (m model) viewResults() string {
@@ -940,20 +970,68 @@ func runPipelineStage(inputFile, sender, workDir string, s stage) tea.Cmd {
 		cmd := exec.Command(python, args...)
 		cmd.Dir = workDir
 
-		output, err := cmd.CombinedOutput()
+		// Create pipes for stdout and stderr
+		stdout, err := cmd.StdoutPipe()
 		if err != nil {
-			// Include actual error output
-			errDetail := strings.TrimSpace(string(output))
-			if len(errDetail) > 200 {
-				errDetail = errDetail[len(errDetail)-200:]
+			return stageErrorMsg{stage: s, err: err}
+		}
+		stderr, err := cmd.StderrPipe()
+		if err != nil {
+			return stageErrorMsg{stage: s, err: err}
+		}
+
+		// Start the command
+		if err := cmd.Start(); err != nil {
+			return stageErrorMsg{stage: s, err: err}
+		}
+
+		// Collect all output for parsing stats at the end
+		var allOutput strings.Builder
+		var lastErr string
+
+		// Read stdout and stderr concurrently
+		done := make(chan bool, 2)
+
+		readPipe := func(pipe io.Reader, isStderr bool) {
+			scanner := bufio.NewScanner(pipe)
+			for scanner.Scan() {
+				line := scanner.Text()
+				allOutput.WriteString(line + "\n")
+				if isStderr {
+					lastErr = line
+				}
+				// Send log update to UI (truncate long lines)
+				displayLine := line
+				if len(displayLine) > 50 {
+					displayLine = displayLine[:47] + "..."
+				}
+				if program != nil {
+					program.Send(logUpdateMsg{line: displayLine})
+				}
 			}
-			return stageErrorMsg{stage: s, err: fmt.Errorf("%s", errDetail)}
+			done <- true
+		}
+
+		go readPipe(stdout, false)
+		go readPipe(stderr, true)
+
+		// Wait for both readers
+		<-done
+		<-done
+
+		// Wait for command to finish
+		err = cmd.Wait()
+		if err != nil {
+			errMsg := lastErr
+			if errMsg == "" {
+				errMsg = err.Error()
+			}
+			return stageErrorMsg{stage: s, err: fmt.Errorf("%s", errMsg)}
 		}
 
 		// Parse JSON stats from output
 		var stats map[string]int
-		lines := strings.Split(string(output), "\n")
-		for _, line := range lines {
+		for _, line := range strings.Split(allOutput.String(), "\n") {
 			if strings.HasPrefix(line, "{") {
 				if err := json.Unmarshal([]byte(line), &stats); err == nil {
 					break
@@ -970,7 +1048,6 @@ func runPipelineStage(inputFile, sender, workDir string, s stage) tea.Cmd {
 
 			// Return all results
 			results := make(map[string]map[string]int)
-			// This is simplified - in practice we'd collect all stats
 			results["curate"] = stats
 			return pipelineCompleteMsg{results: results}
 		}
@@ -988,8 +1065,8 @@ func copyFile(src, dst string) error {
 }
 
 func main() {
-	p := tea.NewProgram(initialModel(), tea.WithAltScreen())
-	if _, err := p.Run(); err != nil {
+	program = tea.NewProgram(initialModel(), tea.WithAltScreen())
+	if _, err := program.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
