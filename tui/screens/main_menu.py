@@ -1,7 +1,7 @@
 """Main menu screen with resume detection."""
 
 from textual.app import ComposeResult
-from textual.containers import Center, Vertical
+from textual.containers import Vertical
 from textual.screen import Screen
 from textual.widgets import Button, Footer, Static
 
@@ -25,38 +25,37 @@ class MainMenuScreen(Screen):
     def compose(self) -> ComposeResult:
         yield BrandedHeader()
 
-        with Center():
-            with Vertical(id="menu-container"):
-                # Check for incomplete jobs
-                self.incomplete_job = self.job_tracker.get_most_recent_incomplete()
+        with Vertical(id="menu-container"):
+            # Check for incomplete jobs
+            self.incomplete_job = self.job_tracker.get_most_recent_incomplete()
 
-                if self.incomplete_job:
-                    yield Button(
-                        f"Continue previous ({self.incomplete_job.mbox_name})",
-                        id="btn-resume",
-                        classes="menu-button -resume",
-                    )
+            if self.incomplete_job:
+                yield Button(
+                    f"Continue previous ({self.incomplete_job.mbox_name})",
+                    id="btn-resume",
+                    classes="menu-button -resume",
+                )
 
-                yield Button(
-                    "Get started",
-                    id="btn-start",
-                    classes="menu-button -primary",
-                )
-                yield Button(
-                    "Help",
-                    id="btn-help",
-                    classes="menu-button",
-                )
-                yield Button(
-                    "Uninstall",
-                    id="btn-uninstall",
-                    classes="menu-button",
-                )
-                yield Button(
-                    "Quit",
-                    id="btn-quit",
-                    classes="menu-button",
-                )
+            yield Button(
+                "Get started",
+                id="btn-start",
+                classes="menu-button -primary",
+            )
+            yield Button(
+                "Help",
+                id="btn-help",
+                classes="menu-button",
+            )
+            yield Button(
+                "Uninstall",
+                id="btn-uninstall",
+                classes="menu-button",
+            )
+            yield Button(
+                "Quit",
+                id="btn-quit",
+                classes="menu-button",
+            )
 
         yield Footer()
 

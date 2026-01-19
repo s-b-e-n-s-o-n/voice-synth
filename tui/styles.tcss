@@ -1,221 +1,44 @@
-/* Voice Synthesizer TUI Styles
- * Uses textual-dark theme variables
- */
+/* Voice Synthesizer TUI Styles */
 
-/* Global */
 Screen {
-    background: $surface;
-    layout: vertical;
+    align: center middle;
 }
 
 /* Branded Header */
 BrandedHeader {
+    width: 60;
     height: auto;
-    width: 100%;
-    content-align: center middle;
-    border: double $primary;
-    padding: 1 4;
-    margin: 1 2;
+    border: round $primary;
+    padding: 1 2;
+    margin: 1 0 2 0;
+}
+
+/* Menu container */
+#menu-container {
+    width: 50;
+    height: auto;
+    align: center middle;
 }
 
 /* Menu Buttons */
 .menu-button {
     width: 100%;
-    height: 3;
-    margin: 0 2 1 2;
-    content-align: center middle;
-    background: $surface;
-    border: solid $primary-darken-2;
-}
-
-.menu-button:hover {
-    background: $primary-darken-3;
-    border: solid $primary;
-}
-
-.menu-button:focus {
-    background: $primary-darken-2;
-    border: double $primary;
-    text-style: bold;
+    margin: 0 0 1 0;
 }
 
 .menu-button.-primary {
-    border: solid $primary;
-    color: $primary;
-}
-
-.menu-button.-primary:hover {
-    background: $primary-darken-3;
-    border: double $primary;
-}
-
-.menu-button.-primary:focus {
-    background: $primary-darken-2;
-    border: double $secondary;
-    color: $secondary;
+    background: $primary;
 }
 
 .menu-button.-resume {
-    border: solid $success;
-    color: $success;
+    background: $success;
 }
 
-.menu-button.-resume:focus {
-    background: $success-darken-3;
-    border: double $success;
-}
-
-/* Stage Tracker */
-StageTracker {
-    height: auto;
-    width: 100%;
-    padding: 0 2;
-    margin: 1 0;
-}
-
-/* Progress Bar */
-ProgressBar {
-    padding: 0 2;
-}
-
-ProgressBar > .bar--bar {
-    color: $primary;
-}
-
-ProgressBar > .bar--complete {
-    color: $success;
-}
-
-/* Input fields */
-Input {
-    margin: 1 2;
-    border: solid $primary-darken-2;
-}
-
-Input:focus {
-    border: solid $primary;
-}
-
-Input.-valid {
-    border: solid $success;
-}
-
-Input.-invalid {
-    border: solid $error;
-}
-
-/* File picker specific */
-.file-input {
-    height: 3;
-}
-
-.file-hint {
-    text-align: center;
-    color: $text-muted;
-    text-style: italic;
-    margin: 0 2;
-}
-
-/* Selection list */
-SelectionList {
-    margin: 1 2;
-    border: solid $primary-darken-2;
-    height: auto;
-    max-height: 12;
-}
-
-SelectionList:focus {
-    border: solid $primary;
-}
-
-/* Option list for menus */
-OptionList {
-    margin: 1 2;
-    border: solid $primary-darken-2;
-    height: auto;
-}
-
-OptionList:focus {
-    border: solid $primary;
-}
-
-OptionList > .option-list--option-highlighted {
-    background: $primary-darken-3;
-}
-
-/* Data tables */
-DataTable {
-    margin: 1 2;
-    height: auto;
-}
-
-DataTable > .datatable--header {
-    color: $primary;
-    text-style: bold;
-}
-
-DataTable > .datatable--cursor {
-    background: $primary-darken-3;
-}
-
-/* Help screen */
-MarkdownViewer {
-    margin: 1 2;
-}
-
-/* Footer/status */
-.status-bar {
-    dock: bottom;
-    height: 1;
-    background: $panel;
-    color: $text-muted;
-    padding: 0 2;
-}
-
-/* Modal dialogs */
-.modal-dialog {
-    align: center middle;
-    width: 60;
-    height: auto;
-    border: double $primary;
-    background: $surface;
-    padding: 1 2;
-}
-
-.modal-dialog .modal-title {
-    text-align: center;
-    text-style: bold;
-    color: $primary;
-    margin-bottom: 1;
-}
-
-.modal-dialog .modal-body {
-    text-align: center;
-    margin-bottom: 1;
-}
-
-.modal-dialog .modal-buttons {
-    layout: horizontal;
-    height: 3;
-    align: center middle;
-}
-
-.modal-dialog .modal-button {
-    width: 15;
-    margin: 0 1;
-}
-
-/* Centered container */
-.centered-container {
-    align: center middle;
-    width: 100%;
-    height: 100%;
-}
-
+/* Centered content container */
 .centered-content {
     width: 60;
     height: auto;
-    align: center middle;
+    padding: 1;
 }
 
 /* Section titles */
@@ -229,10 +52,48 @@ MarkdownViewer {
 .section-subtitle {
     text-align: center;
     color: $text-muted;
-    margin: 0 2 1 2;
+    margin: 0 0 1 0;
 }
 
-/* Results screen */
+/* File hint */
+.file-hint {
+    text-align: center;
+    color: $text-muted;
+    text-style: italic;
+    margin: 0 0 1 0;
+}
+
+/* Input fields */
+Input {
+    margin: 1 0;
+}
+
+Input.-valid {
+    border: solid $success;
+}
+
+Input.-invalid {
+    border: solid $error;
+}
+
+.file-input {
+    width: 100%;
+}
+
+/* Option list */
+OptionList {
+    height: auto;
+    max-height: 10;
+    margin: 1 0;
+}
+
+/* Data tables */
+DataTable {
+    height: auto;
+    margin: 1 0;
+}
+
+/* Results */
 .results-header {
     text-align: center;
     text-style: bold;
@@ -243,21 +104,56 @@ MarkdownViewer {
 .results-path {
     text-align: center;
     color: $success;
-    margin: 0 2 1 2;
+    margin: 0 0 1 0;
 }
 
-/* Loading indicator */
-.loading-indicator {
+/* Modal dialogs */
+.modal-dialog {
+    width: 50;
+    height: auto;
+    border: round $primary;
+    background: $surface;
+    padding: 2;
+}
+
+.modal-title {
     text-align: center;
+    text-style: bold;
     color: $primary;
-    margin: 2 0;
+    margin: 0 0 1 0;
+}
+
+.modal-body {
+    text-align: center;
+    margin: 0 0 1 0;
+}
+
+.modal-buttons {
+    layout: horizontal;
+    align: center middle;
+    height: 3;
+}
+
+.modal-button {
+    margin: 0 1;
+}
+
+/* Stage tracker */
+StageTracker {
+    height: auto;
+    margin: 1 0;
+}
+
+/* Progress bar */
+ProgressBar {
+    margin: 1 0;
 }
 
 /* Error display */
 .error-message {
     text-align: center;
     color: $error;
-    margin: 1 2;
+    margin: 1 0;
     padding: 1;
     border: solid $error;
 }

@@ -12,7 +12,6 @@ class VoiceSynthApp(App):
     """Voice Synthesizer - Email data preparation TUI."""
 
     TITLE = "Voice Synthesizer"
-    SUB_TITLE = "Email data preparation for GPT fine-tuning"
 
     CSS_PATH = Path(__file__).parent / "styles.tcss"
 
@@ -21,6 +20,9 @@ class VoiceSynthApp(App):
         Binding("escape", "back", "Back", show=True),
         Binding("?", "help", "Help", show=True),
     ]
+
+    # Disable mouse support to avoid escape code issues
+    ENABLE_COMMAND_PALETTE = False
 
     # Pipeline state - shared across screens
     input_file: str = ""
