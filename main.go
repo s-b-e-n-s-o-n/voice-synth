@@ -122,6 +122,8 @@ type model struct {
 	currentStage stage
 	stageStats   map[stage]map[string]int
 	results      map[string]map[string]int
+	failedStage  stage  // -1 if no failure
+	stageLog     string // Current stage output/progress
 
 	// Setup state
 	setupStep       int
@@ -152,14 +154,15 @@ func initialModel() model {
 	p := progress.New(progress.WithDefaultGradient())
 
 	return model{
-		screen:     screenSetup,
-		menuItems:  []string{"Get Started", "Help", "Uninstall", "Quit"},
-		textInput:  ti,
-		spinner:    s,
-		progress:   p,
-		stageStats: make(map[stage]map[string]int),
-		setupStep:  -1,
-		setupSteps: []string{
+		screen:      screenSetup,
+		menuItems:   []string{"Get Started", "Help", "Uninstall", "Quit"},
+		textInput:   ti,
+		spinner:     s,
+		progress:    p,
+		stageStats:  make(map[stage]map[string]int),
+		failedStage: -1,
+		setupStep:   -1,
+		setupSteps:  []string{
 			"Creating Python environment",
 			"Installing core libraries",
 			"Installing Presidio (PII detection)",
@@ -241,6 +244,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case stageErrorMsg:
+		m.failedStage = msg.stage
 		m.errMsg = msg.err.Error()
 		return m, nil
 
@@ -476,7 +480,12 @@ func (m model) viewProgress() string {
 		var icon, text string
 		var style lipgloss.Style
 
-		if stats, ok := m.stageStats[st.s]; ok {
+		if st.s == m.failedStage {
+			// Failed
+			icon = "✗"
+			style = errorStyle
+			text = st.name + " - failed"
+		} else if stats, ok := m.stageStats[st.s]; ok {
 			// Completed
 			icon = "✓"
 			style = stageCompleteStyle
@@ -489,8 +498,8 @@ func (m model) viewProgress() string {
 			} else {
 				text = st.name
 			}
-		} else if st.s == m.currentStage {
-			// Running
+		} else if st.s == m.currentStage && m.failedStage == -1 {
+			// Running (only if no failure)
 			icon = m.spinner.View()
 			style = stageRunningStyle
 			text = st.name + "..."
@@ -504,8 +513,12 @@ func (m model) viewProgress() string {
 		content += fmt.Sprintf("%s %s\n", icon, style.Render(text))
 	}
 
+	// Log/status area
 	if m.errMsg != "" {
 		content += "\n" + errorStyle.Render("Error: "+m.errMsg)
+		content += "\n\n" + dimStyle.Render("esc to go back")
+	} else if m.stageLog != "" {
+		content += "\n" + dimStyle.Render(m.stageLog)
 	}
 
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
