@@ -1,1114 +1,391 @@
-#!/usr/bin/env bash
-#
-# voice-synth - Interactive TUI for email data preparation pipeline
-# All dependencies are automatically installed to ~/.cache/voice-synth/
-#
+#!/usr/bin/env python3
+"""
+voice-synth - Interactive TUI for email data preparation pipeline
 
-set -e
+All dependencies are automatically installed to ~/.cache/voice-synth/venv/
+"""
 
-VERSION="0.2.507-alpha"
-
-# Graceful exit handler
-graceful_exit() {
-    echo ""
-    echo ""
-    if command -v gum &>/dev/null || [ -x "$GUM" ]; then
-        center "$("${GUM:-gum}" style --foreground 245 '👋 Goodbye!')"
-    else
-        echo "  👋 Goodbye!"
-    fi
-    echo ""
-    exit 0
-}
-
-# Trap Ctrl+C
-trap graceful_exit INT TERM
-
-# Directory for isolated venv and cache
-CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/voice-synth"
-VENV_DIR="$CACHE_DIR/venv"
-PYTHON="$VENV_DIR/bin/python3"
-GUM_DIR="$CACHE_DIR/bin"
-GUM="$GUM_DIR/gum"
-GUM_VERSION="0.14.5"
-JOBS_FILE="$CACHE_DIR/jobs.json"
-
-# Get terminal width for centering
-WIDTH=${COLUMNS:-80}
-
-# Calculate left margin to center a given width
-margin_for_width() {
-    local item_width="${1:-40}"
-    local margin=$(( (WIDTH - item_width) / 2 ))
-    [ "$margin" -lt 0 ] && margin=0
-    echo "$margin"
-}
-
-# Centered text helper
-center() {
-    "$GUM" style --width "$WIDTH" --align center "$@"
-}
-
-# Standard width for interactive elements
-ITEM_WIDTH=50
-
-# Get padding string for centering
-get_padding() {
-    local item_width="${1:-$ITEM_WIDTH}"
-    local margin=$(( (WIDTH - item_width) / 2 ))
-    [ "$margin" -lt 0 ] && margin=0
-    printf '%*s' "$margin" ''
-}
-
-# Job tracking functions
-init_jobs_file() {
-    if [ ! -f "$JOBS_FILE" ]; then
-        echo '[]' > "$JOBS_FILE"
-    fi
-}
-
-# Add or update a job
-save_job() {
-    local mbox_path="$1"
-    local work_dir="$2"
-    local status="$3"  # in_progress, completed
-    local timestamp
-    timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-
-    init_jobs_file
-
-    # Use Python for JSON manipulation (jq not guaranteed)
-    "$PYTHON" -c "
-import json
+import os
+import signal
+import subprocess
 import sys
+import time
+from pathlib import Path
 
-mbox = '$mbox_path'
-work_dir = '$work_dir'
-status = '$status'
-timestamp = '$timestamp'
+VERSION = "0.3.0-alpha"
 
-with open('$JOBS_FILE', 'r') as f:
-    jobs = json.load(f)
+# Colors (ANSI escape codes - stdlib only, no deps needed)
+PURPLE = "\033[38;5;99m"
+GREEN = "\033[38;5;82m"
+YELLOW = "\033[38;5;214m"
+DIM = "\033[38;5;245m"
+BOLD = "\033[1m"
+RESET = "\033[0m"
 
-# Update existing or add new
-found = False
-for job in jobs:
-    if job.get('mbox') == mbox and job.get('work_dir') == work_dir:
-        job['status'] = status
-        job['updated'] = timestamp
-        found = True
-        break
+# Box drawing characters
+BOX_TL = "\u2554"  # ╔
+BOX_TR = "\u2557"  # ╗
+BOX_BL = "\u255a"  # ╚
+BOX_BR = "\u255d"  # ╝
+BOX_H = "\u2550"   # ═
+BOX_V = "\u2551"   # ║
 
-if not found:
-    jobs.append({
-        'mbox': mbox,
-        'work_dir': work_dir,
-        'status': status,
-        'started': timestamp,
-        'updated': timestamp
-    })
+# Spinner frames
+SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 
-# Keep only last 10 jobs
-jobs = sorted(jobs, key=lambda x: x.get('updated', ''), reverse=True)[:10]
+# Paths
+CACHE_DIR = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "voice-synth"
+VENV_DIR = CACHE_DIR / "venv"
+PYTHON = VENV_DIR / "bin" / "python3"
+SCRIPT_DIR = Path(__file__).resolve().parent
 
-with open('$JOBS_FILE', 'w') as f:
-    json.dump(jobs, f, indent=2)
-"
-}
 
-# Get incomplete jobs as newline-separated "mbox|work_dir" pairs
-get_incomplete_jobs() {
-    init_jobs_file
-    "$PYTHON" -c "
-import json
-import os
+def graceful_exit(signum=None, frame=None):
+    """Handle Ctrl+C gracefully."""
+    print(f"\n\n  {DIM}Goodbye!{RESET}\n")
+    sys.exit(0)
 
-with open('$JOBS_FILE', 'r') as f:
-    jobs = json.load(f)
 
-for job in jobs:
-    if job.get('status') == 'in_progress':
-        work_dir = job.get('work_dir', '')
-        # Check if work_dir still exists and has intermediate files
-        if os.path.isdir(work_dir):
-            has_intermediate = (
-                os.path.exists(os.path.join(work_dir, 'emails_raw.json')) or
-                os.path.exists(os.path.join(work_dir, 'emails.jsonl')) or
-                os.path.exists(os.path.join(work_dir, 'cleaned_emails.json'))
+signal.signal(signal.SIGINT, graceful_exit)
+signal.signal(signal.SIGTERM, graceful_exit)
+
+
+def get_terminal_width():
+    """Get terminal width, defaulting to 80."""
+    try:
+        return os.get_terminal_size().columns
+    except OSError:
+        return 80
+
+
+def center(text, width=None):
+    """Center text in terminal."""
+    if width is None:
+        width = get_terminal_width()
+    lines = text.split("\n")
+    return "\n".join(line.center(width) for line in lines)
+
+
+def print_banner():
+    """Print the purple ASCII banner using stdlib only."""
+    width = min(get_terminal_width(), 60)
+    inner_width = width - 4  # Account for borders and padding
+
+    title = "Voice Synthesizer"
+    subtitle = "Email data preparation for GPT fine-tuning"
+    version = f"v{VERSION}"
+
+    print()
+    print(center(f"{PURPLE}{BOX_TL}{BOX_H * (width - 2)}{BOX_TR}{RESET}"))
+    print(center(f"{PURPLE}{BOX_V}{RESET}{' ' * (width - 2)}{PURPLE}{BOX_V}{RESET}"))
+    print(center(f"{PURPLE}{BOX_V}{RESET}{BOLD}{PURPLE}{title.center(width - 2)}{RESET}{PURPLE}{BOX_V}{RESET}"))
+    print(center(f"{PURPLE}{BOX_V}{RESET}{DIM}{subtitle.center(width - 2)}{RESET}{PURPLE}{BOX_V}{RESET}"))
+    print(center(f"{PURPLE}{BOX_V}{RESET}{DIM}{version.center(width - 2)}{RESET}{PURPLE}{BOX_V}{RESET}"))
+    print(center(f"{PURPLE}{BOX_V}{RESET}{' ' * (width - 2)}{PURPLE}{BOX_V}{RESET}"))
+    print(center(f"{PURPLE}{BOX_BL}{BOX_H * (width - 2)}{BOX_BR}{RESET}"))
+    print()
+
+
+def spinner_print(message, done=False, success=True):
+    """Print a line with spinner or checkmark."""
+    if done:
+        mark = f"{GREEN}✓{RESET}" if success else f"{YELLOW}!{RESET}"
+        print(f"\r  {mark} {message}                    ")
+    else:
+        # Just print the message, spinner animation handled separately
+        print(f"  {SPINNER[0]} {message}", end="", flush=True)
+
+
+def run_with_spinner(cmd, message, capture=False):
+    """Run a command with a spinner animation."""
+    print(f"  {SPINNER[0]} {message}", end="", flush=True)
+
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE if capture else subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True
+    )
+
+    frame = 0
+    while proc.poll() is None:
+        print(f"\r  {PURPLE}{SPINNER[frame % len(SPINNER)]}{RESET} {message}", end="", flush=True)
+        frame += 1
+        time.sleep(0.1)
+
+    success = proc.returncode == 0
+    mark = f"{GREEN}✓{RESET}" if success else f"{YELLOW}!{RESET}"
+    print(f"\r  {mark} {message}                    ")
+
+    if capture:
+        return proc.stdout.read(), proc.stderr.read(), proc.returncode
+    return None, None, proc.returncode
+
+
+def ensure_venv():
+    """Create venv if it doesn't exist."""
+    if VENV_DIR.exists() and PYTHON.exists():
+        return True
+
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+    _, _, rc = run_with_spinner(
+        [sys.executable, "-m", "venv", str(VENV_DIR)],
+        "Creating Python environment"
+    )
+
+    if rc != 0:
+        print(f"  {YELLOW}!{RESET} Failed to create virtual environment")
+        return False
+
+    # Upgrade pip
+    run_with_spinner(
+        [str(PYTHON), "-m", "pip", "install", "--upgrade", "pip", "--quiet"],
+        "Upgrading pip"
+    )
+
+    return True
+
+
+def check_import(module_name):
+    """Check if a module can be imported in the venv."""
+    result = subprocess.run(
+        [str(PYTHON), "-c", f"import {module_name}"],
+        capture_output=True
+    )
+    return result.returncode == 0
+
+
+def check_spacy_model():
+    """Check if spaCy model is installed."""
+    result = subprocess.run(
+        [str(PYTHON), "-c", "import spacy; spacy.load('en_core_web_lg')"],
+        capture_output=True
+    )
+    return result.returncode == 0
+
+
+def install_lightweight_deps():
+    """Install lightweight dependencies (textual, rich, ijson, datasketch)."""
+    packages = []
+
+    if not check_import("textual"):
+        packages.append("textual>=1.0.0")
+    if not check_import("rich"):
+        packages.append("rich>=13.0.0")
+    if not check_import("ijson"):
+        packages.append("ijson>=3.2.0")
+    if not check_import("datasketch"):
+        packages.append("datasketch>=1.6.0")
+
+    if not packages:
+        return True
+
+    _, _, rc = run_with_spinner(
+        [str(PYTHON), "-m", "pip", "install", "--quiet"] + packages,
+        f"Installing {', '.join(p.split('>=')[0] for p in packages)}"
+    )
+
+    return rc == 0
+
+
+def install_heavy_deps_with_progress():
+    """Install heavy dependencies with Rich progress bars."""
+    # Check what we need to install
+    need_presidio = not check_import("presidio_analyzer")
+    need_spacy = not check_import("spacy")
+    need_model = not check_spacy_model()
+
+    if not need_presidio and not need_spacy and not need_model:
+        return True
+
+    # Now we can use Rich since lightweight deps are installed
+    try:
+        from rich.console import Console
+        from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
+        from rich.panel import Panel
+        from rich.text import Text
+    except ImportError:
+        # Fallback to simple spinners if Rich isn't working
+        if need_spacy:
+            run_with_spinner(
+                [str(PYTHON), "-m", "pip", "install", "spacy>=3.5.0", "--quiet"],
+                "Installing spaCy"
             )
-            # Skip if already completed
-            if os.path.exists(os.path.join(work_dir, 'style_shortlist.csv')):
-                continue
-            if has_intermediate:
-                mbox = job.get('mbox', 'unknown')
-                # Show just filename, not full path
-                mbox_name = os.path.basename(mbox)
-                print(f'{mbox_name}|{work_dir}')
-"
-}
-
-# Resolve which gum to use (system or cached)
-resolve_gum() {
-    if command -v gum &> /dev/null; then
-        GUM="gum"
-    elif [ -x "$GUM" ]; then
-        : # Use cached version
-    else
-        GUM=""
-    fi
-}
-
-# Download and install gum to cache directory
-install_gum() {
-    echo ""
-    echo "╭─────────────────────────────────────────╮"
-    echo "│  First-time setup: downloading tools... │"
-    echo "╰─────────────────────────────────────────╯"
-    echo ""
-    mkdir -p "$GUM_DIR"
-
-    local os arch url
-    os="$(uname -s)"
-    arch="$(uname -m)"
-
-    case "$os" in
-        Darwin) os="Darwin" ;;
-        Linux)  os="Linux" ;;
-        *)
-            echo "Error: Unsupported OS: $os"
-            echo "Please install gum manually: https://github.com/charmbracelet/gum"
-            exit 1
-            ;;
-    esac
-
-    case "$arch" in
-        x86_64)  arch="x86_64" ;;
-        aarch64|arm64) arch="arm64" ;;
-        *)
-            echo "Error: Unsupported architecture: $arch"
-            echo "Please install gum manually: https://github.com/charmbracelet/gum"
-            exit 1
-            ;;
-    esac
-
-    url="https://github.com/charmbracelet/gum/releases/download/v${GUM_VERSION}/gum_${GUM_VERSION}_${os}_${arch}.tar.gz"
-
-    echo "Downloading terminal UI..."
-    curl -# -L "$url" | tar xz -C "$GUM_DIR" gum
-
-    chmod +x "$GUM"
-    echo "✓ Terminal UI ready"
-    echo ""
-}
-
-# Check for gum, install if missing
-check_gum() {
-    resolve_gum
-    if [ -z "$GUM" ]; then
-        install_gum
-        GUM="$GUM_DIR/gum"
-    fi
-}
-
-# Ensure venv exists, create if needed
-ensure_venv() {
-    if [ ! -d "$VENV_DIR" ]; then
-        mkdir -p "$CACHE_DIR"
-        echo "Creating virtual environment in $VENV_DIR..."
-        python3 -m venv "$VENV_DIR"
-        # Upgrade pip in the new venv
-        "$PYTHON" -m pip install --upgrade pip --quiet
-    fi
-}
-
-# Check Python dependencies (in the isolated venv)
-check_deps() {
-    # Venv must exist first
-    if [ ! -f "$PYTHON" ]; then
-        return 1
-    fi
-
-    local missing=()
-
-    if ! "$PYTHON" -c "import ijson" 2>/dev/null; then
-        missing+=("ijson")
-    fi
-    if ! "$PYTHON" -c "import presidio_analyzer" 2>/dev/null; then
-        missing+=("presidio-analyzer presidio-anonymizer")
-    fi
-    if ! "$PYTHON" -c "import spacy; spacy.load('en_core_web_lg')" 2>/dev/null; then
-        missing+=("spacy model (en_core_web_lg)")
-    fi
-
-    if [ ${#missing[@]} -gt 0 ]; then
-        return 1
-    fi
-    return 0
-}
-
-# Header
-show_header() {
-    clear
-    echo ""
-    "$GUM" style \
-        --border double \
-        --border-foreground 99 \
-        --padding "1 4" \
-        --margin "1 0 1 0" \
-        --align center \
-        --width "$WIDTH" \
-        "$("$GUM" style --foreground 99 --bold 'Voice Synthesizer')" \
-        "$("$GUM" style --foreground 245 'Email data preparation for GPT fine-tuning')" \
-        "$("$GUM" style --foreground 240 "v$VERSION")"
-    echo ""
-}
-
-# Setup wizard - creates isolated venv and installs dependencies
-setup_deps() {
-    show_header
-
-    # Check if everything is already set up
-    if check_deps; then
-        return 0
-    fi
-
-    # First-time setup - auto-install everything
-    center "$("$GUM" style --foreground 99 --bold 'First-time setup')"
-    echo ""
-    center "$("$GUM" style --foreground 245 'Installing required components...')"
-    center "$("$GUM" style --foreground 245 --italic 'This only happens once.')"
-    echo ""
-
-    # Create venv if needed
-    if [ ! -d "$VENV_DIR" ]; then
-        "$GUM" spin --spinner dot --title "Creating Python environment..." -- \
-            bash -c "mkdir -p '$CACHE_DIR' && python3 -m venv '$VENV_DIR' && '$PYTHON' -m pip install --upgrade pip --quiet"
-        echo "  $("$GUM" style --foreground 82 '✓') Python environment"
-    else
-        echo "  $("$GUM" style --foreground 82 '✓') Python environment"
-    fi
-
-    # Install Python packages one by one, skipping if already installed
-    if "$PYTHON" -c "import ijson" 2>/dev/null; then
-        echo "  $("$GUM" style --foreground 82 '✓') ijson (JSON parser)"
-    else
-        "$GUM" spin --spinner dot --title "Installing ijson..." -- \
-            "$PYTHON" -m pip install ijson --quiet
-        echo "  $("$GUM" style --foreground 82 '✓') ijson (JSON parser)"
-    fi
-
-    if "$PYTHON" -c "import spacy" 2>/dev/null; then
-        echo "  $("$GUM" style --foreground 82 '✓') spaCy (language processing)"
-    else
-        "$GUM" spin --spinner dot --title "Installing spaCy..." -- \
-            "$PYTHON" -m pip install spacy --quiet
-        echo "  $("$GUM" style --foreground 82 '✓') spaCy (language processing)"
-    fi
-
-    if "$PYTHON" -c "import presidio_analyzer" 2>/dev/null; then
-        echo "  $("$GUM" style --foreground 82 '✓') Presidio (privacy protection)"
-    else
-        "$GUM" spin --spinner dot --title "Installing Presidio..." -- \
-            "$PYTHON" -m pip install presidio-analyzer presidio-anonymizer --quiet
-        echo "  $("$GUM" style --foreground 82 '✓') Presidio (privacy protection)"
-    fi
-
-    # Download spaCy model if needed
-    if "$PYTHON" -c "import spacy; spacy.load('en_core_web_lg')" 2>/dev/null; then
-        echo "  $("$GUM" style --foreground 82 '✓') Language model (en_core_web_lg)"
-    else
-        "$GUM" spin --spinner dot --title "Downloading language model (~1 min)..." -- \
-            "$PYTHON" -m spacy download en_core_web_lg --quiet
-        echo "  $("$GUM" style --foreground 82 '✓') Language model (en_core_web_lg)"
-    fi
-
-    echo ""
-    center "$("$GUM" style --foreground 82 --bold '✓ Setup complete!')"
-    sleep 1
-}
-
-# File picker - drag and drop from Finder
-# Returns selected file path to stdout, displays UI to stderr
-pick_file() {
-    local prompt="$1"
-
-    # All display output goes to stderr so only the path goes to stdout
-    center "$("$GUM" style --foreground 245 "$prompt")" >&2
-    echo "" >&2
-    center "$("$GUM" style --foreground 245 --italic '👇 Drag from Finder into this window, then press Enter')" >&2
-
-    local raw_path
-    raw_path=$("$GUM" input --placeholder "Drop file here..." --width 80) || graceful_exit
-
-    # Clean up path from drag-and-drop or copy-paste
-    # Remove surrounding quotes if present
-    raw_path="${raw_path#\'}"
-    raw_path="${raw_path%\'}"
-    raw_path="${raw_path#\"}"
-    raw_path="${raw_path%\"}"
-
-    # Use eval to interpret escaped sequences (handles \  for spaces)
-    local clean_path
-    clean_path=$(eval echo "$raw_path" 2>/dev/null) || clean_path="$raw_path"
-
-    # Trim whitespace
-    clean_path="${clean_path#"${clean_path%%[![:space:]]*}"}"
-    clean_path="${clean_path%"${clean_path##*[![:space:]]}"}"
-
-    echo "$clean_path"
-}
-
-# Get sender email with auto-detection
-# Args: $1 = mbox file path (optional, for auto-detection)
-# Returns sender email to stdout, displays UI to stderr
-get_sender() {
-    local mbox_file="$1"
-    local detected_email=""
-
-    # Clear screen for fresh start
-    show_header >&2
-    center "$("$GUM" style --foreground 99 --bold 'Sender Filter')" >&2
-    echo "" >&2
-
-    # Try to auto-detect owner email from mbox
-    if [ -n "$mbox_file" ] && [ -f "$mbox_file" ]; then
-        center "$("$GUM" style --foreground 245 '🔍 Detecting your email address...')" >&2
-        detected_email=$("$PYTHON" pipeline.py detect-owner "$mbox_file" 2>/dev/null) || detected_email=""
-    fi
-
-    local pad
-    pad=$(get_padding $ITEM_WIDTH)
-
-    if [ -n "$detected_email" ]; then
-        # Found email - ask for confirmation
-        echo "" >&2
-        center "$("$GUM" style --foreground 82 "✅ Detected: $detected_email")" >&2
-        echo "" >&2
-        center "$("$GUM" style --foreground 245 'Filter to emails from this sender?')" >&2
-        echo "" >&2
-
-        local choice
-        choice=$("$GUM" choose \
-            "${pad}Yes, use $detected_email" \
-            "${pad}No, enter a different email" \
-            "${pad}No, keep all senders") || graceful_exit
-        choice="${choice#"$pad"}"
-
-        if [[ "$choice" == "Yes"* ]]; then
-            echo "$detected_email"
-        elif [[ "$choice" == "No, enter"* ]]; then
-            echo "" >&2
-            "$GUM" input --placeholder "Enter sender email" --value "$detected_email" --width 80 || graceful_exit
-        fi
-        # Return nothing if "keep all senders"
-    else
-        # No detection - ask manually
-        center "$("$GUM" style --foreground 245 'Filter to emails from a specific sender?')" >&2
-        echo "" >&2
-
-        local choice
-        choice=$("$GUM" choose "${pad}Yes, filter by sender" "${pad}No, keep all senders") || graceful_exit
-        choice="${choice#"$pad"}"
-
-        if [[ "$choice" == "Yes"* ]]; then
-            echo "" >&2
-            "$GUM" input --placeholder "Enter sender email (e.g., user@example.com)" --width 80 || graceful_exit
-        fi
-    fi
-}
-
-# Run import MBOX stage
-run_import() {
-    show_header
-    center "$("$GUM" style --foreground 99 --bold 'Step 0: Import MBOX (Google Takeout)')"
-    echo ""
-    center "$("$GUM" style --foreground 245 'This converts an MBOX file from Google Takeout to JSON,')"
-    center "$("$GUM" style --foreground 245 'stripping attachments and keeping only text content.')"
-    echo ""
-
-    local input_file
-    input_file=$(pick_file "Select MBOX file:" "*.mbox")
-
-    local pad
-    pad=$(get_padding $ITEM_WIDTH)
-
-    if [ -z "$input_file" ] || [ ! -f "$input_file" ]; then
-        echo ""
-        center "$("$GUM" style --foreground 196 "File not found: $input_file")"
-        "$GUM" input --placeholder "Press Enter to continue..."
-        return 1
-    fi
-
-    local output_file="${input_file%.mbox}.json"
-    echo ""
-    center "$("$GUM" style --foreground 245 "Output: $output_file")"
-    echo ""
-    center "$("$GUM" style --foreground 214 'This may take a while for large mailboxes...')"
-    echo ""
-
-    "$PYTHON" pipeline.py import "$input_file" --out "$output_file"
-
-    echo ""
-    center "$("$GUM" style --foreground 82 "Done! Created: $output_file")"
-    "$GUM" input --placeholder "Press Enter to continue..."
-}
-
-# Run convert stage
-run_convert() {
-    show_header
-    center "$("$GUM" style --foreground 99 --bold 'Step 1: Convert to JSONL')"
-    echo ""
-
-    local input_file
-    input_file=$(pick_file "Select input JSON file:" "*.json")
-
-    local pad
-    pad=$(get_padding $ITEM_WIDTH)
-
-    if [ -z "$input_file" ] || [ ! -f "$input_file" ]; then
-        echo ""
-        center "$("$GUM" style --foreground 196 "File not found: $input_file")"
-        "$GUM" input --placeholder "Press Enter to continue..."
-        return 1
-    fi
-
-    local output_file="${input_file%.json}.jsonl"
-    echo ""
-    center "$("$GUM" style --foreground 245 "Output: $output_file")"
-    echo ""
-
-    "$GUM" spin --spinner dot --title "Converting and stripping attachments..." -- \
-        "$PYTHON" pipeline.py convert "$input_file" --out "$output_file"
-
-    center "$("$GUM" style --foreground 82 "Done! Created: $output_file")"
-    "$GUM" input --placeholder "Press Enter to continue..."
-}
-
-# Run clean stage
-run_clean() {
-    show_header
-    center "$("$GUM" style --foreground 99 --bold 'Step 2: Clean & Anonymize')"
-    echo ""
-
-    local input_file
-    input_file=$(pick_file "Select input file:" "*.json*")
-
-    local pad
-    pad=$(get_padding $ITEM_WIDTH)
-
-    if [ -z "$input_file" ] || [ ! -f "$input_file" ]; then
-        echo ""
-        center "$("$GUM" style --foreground 196 "File not found: $input_file")"
-        "$GUM" input --placeholder "Press Enter to continue..."
-        return 1
-    fi
-
-    local sender
-    sender=$(get_sender "$input_file")
-
-    local sender_arg=""
-    if [ -n "$sender" ]; then
-        sender_arg="--sender $sender"
-    fi
-
-    local output_file="cleaned_emails.json"
-    echo ""
-    center "$("$GUM" style --foreground 245 "Output: $output_file")"
-    echo ""
-    center "$("$GUM" style --foreground 214 'This may take a while for large files...')"
-    echo ""
-
-    # Run with visible output
-    "$PYTHON" pipeline.py clean "$input_file" --out "$output_file" $sender_arg
-
-    echo ""
-    center "$("$GUM" style --foreground 82 "Done! Created: $output_file")"
-    "$GUM" input --placeholder "Press Enter to continue..."
-}
-
-# Run curate stage
-run_curate() {
-    show_header
-    center "$("$GUM" style --foreground 99 --bold 'Step 3: Curate Shortlist')"
-    echo ""
-
-    local input_file
-    input_file=$(pick_file "Select cleaned emails JSON:" "*cleaned*.json")
-
-    local pad
-    pad=$(get_padding $ITEM_WIDTH)
-
-    if [ -z "$input_file" ] || [ ! -f "$input_file" ]; then
-        echo ""
-        center "$("$GUM" style --foreground 196 "File not found: $input_file")"
-        "$GUM" input --placeholder "Press Enter to continue..."
-        return 1
-    fi
-
-    echo ""
-    center "$("$GUM" style --foreground 245 'Max emails per topic:')"
-    local per_topic
-    per_topic=$("$GUM" input --value "200" --placeholder "200" --width 80)
-    per_topic="${per_topic:-200}"
-
-    local output_file="style_shortlist.csv"
-    echo ""
-    center "$("$GUM" style --foreground 245 "Output: $output_file")"
-    echo ""
-
-    "$PYTHON" pipeline.py curate "$input_file" --out "$output_file" --per-topic "$per_topic"
-
-    echo ""
-    center "$("$GUM" style --foreground 82 "Done! Created: $output_file")"
-    center "$("$GUM" style --foreground 245 'Open in a spreadsheet to review and annotate.')"
-    "$GUM" input --placeholder "Press Enter to continue..."
-}
-
-# Run full pipeline
-# Simple get started - just file and sender, use defaults
-run_full_pipeline() {
-    show_header
-    center "$("$GUM" style --foreground 99 --bold 'Get Started')"
-    echo ""
-
-    local pad
-    pad=$(get_padding $ITEM_WIDTH)
-
-    local input_file
-    input_file=$(pick_file "📧 Drop your Google Takeout export (.mbox, folder, or .zip):")
-
-    if [ -z "$input_file" ] || [ ! -f "$input_file" ]; then
-        echo ""
-        center "$("$GUM" style --foreground 196 "File not found: $input_file")"
-        "$GUM" input --placeholder "Press Enter to continue..."
-        return 1
-    fi
-
-    local sender
-    sender=$(get_sender "$input_file")
-
-    local sender_arg=""
-    if [ -n "$sender" ]; then
-        sender_arg="--sender $sender"
-    fi
-
-    # Clear screen for processing phase
-    clear
-    show_header
-    echo ""
-    center "$("$GUM" style --foreground 214 'Processing your emails...')"
-    center "$("$GUM" style --foreground 245 --italic 'This may take a few minutes for large mailboxes.')"
-    echo ""
-
-    # Track job as in_progress
-    local work_dir
-    work_dir=$(pwd)
-    local abs_input
-    abs_input=$(cd "$(dirname "$input_file")" && pwd)/$(basename "$input_file")
-    save_job "$abs_input" "$work_dir" "in_progress"
-
-    "$PYTHON" pipeline.py run "$input_file" $sender_arg
-
-    # Mark job as completed
-    save_job "$abs_input" "$work_dir" "completed"
-
-    # Copy CSV to Desktop
-    local desktop_path="$HOME/Desktop/style_shortlist.csv"
-    cp style_shortlist.csv "$desktop_path" 2>/dev/null || true
-
-    echo ""
-    center "$("$GUM" style --foreground 82 --bold 'Done!')"
-    echo ""
-    center "$("$GUM" style --foreground 82 --bold 'Output saved to Desktop:')"
-    center "$("$GUM" style --foreground 82 '~/Desktop/style_shortlist.csv')"
-    echo ""
-    center "$("$GUM" style --foreground 245 --italic 'Open it in a spreadsheet to review your emails.')"
-    echo ""
-    "$GUM" input --placeholder "Press Enter to continue..."
-}
-
-# Advanced get started - walks through all settings with explanations
-run_full_pipeline_advanced() {
-    show_header
-    center "$("$GUM" style --foreground 99 --bold 'Get Started (Advanced)')"
-    echo ""
-    center "$("$GUM" style --foreground 245 "Let's configure your email processing.")"
-    echo ""
-
-    local pad
-    pad=$(get_padding $ITEM_WIDTH)
-
-    # Step 1: File selection
-    center "$("$GUM" style --foreground 99 --bold 'Step 1: Select your email file')"
-    echo ""
-    local input_file
-    input_file=$(pick_file "📧 Drop your Google Takeout export (.mbox, folder, or .zip):")
-
-    if [ -z "$input_file" ] || [ ! -f "$input_file" ]; then
-        echo ""
-        center "$("$GUM" style --foreground 196 "File not found: $input_file")"
-        "$GUM" input --placeholder "Press Enter to continue..."
-        return 1
-    fi
-
-    # Step 2: Sender filter
-    show_header
-    center "$("$GUM" style --foreground 99 --bold 'Step 2: Filter by sender')"
-    echo ""
-    center "$("$GUM" style --foreground 245 'To train a model on YOUR writing style, we need')"
-    center "$("$GUM" style --foreground 245 'only emails that YOU wrote (not received).')"
-    echo ""
-    local sender
-    sender=$(get_sender "$input_file")
-
-    local sender_arg=""
-    if [ -n "$sender" ]; then
-        sender_arg="--sender $sender"
-    fi
-
-    # Step 3: Date range
-    show_header
-    center "$("$GUM" style --foreground 99 --bold 'Step 3: Date range')"
-    echo ""
-    center "$("$GUM" style --foreground 245 'How many years back should we look?')"
-    center "$("$GUM" style --foreground 245 --italic 'Older emails may not reflect your current writing style.')"
-    echo ""
-    local years
-    years=$("$GUM" input --value "5" --placeholder "5" --width 80)
-    years="${years:-5}"
-
-    # Step 4: Emails per topic
-    show_header
-    center "$("$GUM" style --foreground 99 --bold 'Step 4: Emails per category')"
-    echo ""
-    center "$("$GUM" style --foreground 245 'Max emails to keep per topic (client, strategy, etc.)')"
-    center "$("$GUM" style --foreground 245 --italic 'This ensures balanced training data across different types.')"
-    echo ""
-    local per_topic
-    per_topic=$("$GUM" input --value "200" --placeholder "200" --width 80)
-    per_topic="${per_topic:-200}"
-
-    # Step 5: Minimum length
-    show_header
-    center "$("$GUM" style --foreground 99 --bold 'Step 5: Minimum email length')"
-    echo ""
-    center "$("$GUM" style --foreground 245 'Minimum characters for an email to be included.')"
-    center "$("$GUM" style --foreground 245 --italic 'Short emails like "Thanks!" don'\''t capture your style well.')"
-    echo ""
-    local min_chars
-    min_chars=$("$GUM" input --value "200" --placeholder "200" --width 80)
-    min_chars="${min_chars:-200}"
-
-    # Step 6: Dedupe threshold
-    show_header
-    center "$("$GUM" style --foreground 99 --bold 'Step 6: Duplicate detection')"
-    echo ""
-    center "$("$GUM" style --foreground 245 'How similar should two emails be to count as duplicates?')"
-    center "$("$GUM" style --foreground 245 --italic '0.8 = 80% similar. Higher = stricter, fewer removed.')"
-    echo ""
-    local dedupe_threshold
-    dedupe_threshold=$("$GUM" input --value "0.8" --placeholder "0.8" --width 80)
-    dedupe_threshold="${dedupe_threshold:-0.8}"
-
-    # Step 7: Verbose output
-    show_header
-    center "$("$GUM" style --foreground 99 --bold 'Step 7: Output verbosity')"
-    echo ""
-    center "$("$GUM" style --foreground 245 'Show detailed JSON output at the end?')"
-    center "$("$GUM" style --foreground 245 --italic 'Useful for debugging or piping to other tools.')"
-    echo ""
-    local verbose_choice
-    verbose_choice=$("$GUM" choose "${pad}No (default)" "${pad}Yes (verbose)")
-    local verbose_flag=""
-    if [[ "$verbose_choice" == *"Yes"* ]]; then
-        verbose_flag="--verbose"
-    fi
-
-    # Run pipeline
-    show_header
-    center "$("$GUM" style --foreground 214 'Processing your emails...')"
-    center "$("$GUM" style --foreground 245 --italic 'This may take a few minutes for large mailboxes.')"
-    echo ""
-
-    # Track job as in_progress
-    local work_dir
-    work_dir=$(pwd)
-    local abs_input
-    abs_input=$(cd "$(dirname "$input_file")" && pwd)/$(basename "$input_file")
-    save_job "$abs_input" "$work_dir" "in_progress"
-
-    # Run pipeline stages with structured logging
-    "$GUM" log --level info "Starting pipeline..." file="$input_file"
-    echo ""
-
-    "$GUM" log --level info "Stage 0: Importing MBOX"
-    "$PYTHON" pipeline.py import "$input_file" --out emails_raw.json
-    "$GUM" log --level info "Stage 0: Complete ✓"
-    echo ""
-
-    "$GUM" log --level info "Stage 1: Converting to JSONL"
-    "$PYTHON" pipeline.py convert emails_raw.json --out emails.jsonl
-    "$GUM" log --level info "Stage 1: Complete ✓"
-    echo ""
-
-    "$GUM" log --level info "Stage 2: Cleaning & Anonymizing"
-    "$PYTHON" pipeline.py clean emails.jsonl --out cleaned_emails.json $sender_arg --years "$years"
-    "$GUM" log --level info "Stage 2: Complete ✓"
-    echo ""
-
-    "$GUM" log --level info "Stage 3: Curating Shortlist"
-    "$PYTHON" pipeline.py curate cleaned_emails.json --out style_shortlist.csv --per-topic "$per_topic" --min-chars "$min_chars" --dedupe-threshold "$dedupe_threshold"
-    "$GUM" log --level info "Stage 3: Complete ✓"
-
-    # Mark job as completed
-    save_job "$abs_input" "$work_dir" "completed"
-
-    # Copy CSV to Desktop
-    local desktop_path="$HOME/Desktop/style_shortlist.csv"
-    cp style_shortlist.csv "$desktop_path" 2>/dev/null || true
-
-    # Count results for summary
-    local imported_count cleaned_count final_count filtered_count
-    imported_count=$(python3 -c "import json; print(len(json.load(open('emails_raw.json'))))" 2>/dev/null || echo "0")
-    cleaned_count=$(python3 -c "import json; print(len(json.load(open('cleaned_emails.json'))))" 2>/dev/null || echo "0")
-    final_count=$(tail -n +2 style_shortlist.csv 2>/dev/null | wc -l | tr -d ' ' || echo "0")
-    filtered_count=$((imported_count - cleaned_count))
-
-    echo ""
-    center "$("$GUM" style --foreground 82 --bold '🎉 Done!')"
-    echo ""
-
-    # Summary table using gum table
-    center "$("$GUM" style --foreground 99 '📊 PIPELINE SUMMARY')"
-    echo ""
-    printf "Stage,Count,Status\nImported,%s,✓\nCleaned,%s,✓\nFiltered,%s,🗑️\nFinal,%s,⭐\n" \
-        "$imported_count" "$cleaned_count" "$filtered_count" "$final_count" | \
-        "$GUM" table --border rounded --border.foreground 99
-    echo ""
-
-    center "$("$GUM" style --foreground 82 '📁 Output saved to Desktop:')"
-    center "$("$GUM" style --foreground 82 '~/Desktop/style_shortlist.csv')"
-    echo ""
-    center "$("$GUM" style --foreground 245 --italic 'Open it in a spreadsheet to review your emails.')"
-
-    # Verbose output with gum pager for scrolling
-    if [ -n "$verbose_flag" ]; then
-        echo ""
-        center "$("$GUM" style --foreground 99 '📋 VERBOSE OUTPUT')"
-        echo ""
-        {
-            echo "# Pipeline Results"
-            echo ""
-            echo "## emails_raw.json"
-            echo "Records: $imported_count"
-            echo ""
-            echo "## cleaned_emails.json"
-            echo "Records: $cleaned_count"
-            echo ""
-            echo "## style_shortlist.csv (first 10 rows)"
-            echo '```'
-            head -11 style_shortlist.csv
-            echo '```'
-        } | "$GUM" format | "$GUM" pager
-    fi
-
-    echo ""
-    "$GUM" input --placeholder "Press Enter to continue..."
-}
-
-# Show help with markdown rendering
-show_help() {
-    show_header
-    center "$("$GUM" style --foreground 99 --bold '📖 Help')"
-    echo ""
-
-    # Render markdown help with gum format and show in pager
-    "$GUM" format << 'EOF' | "$GUM" pager --border rounded --border.foreground 99
-
-# Voice Synthesizer
-
-Prepare email data for fine-tuning GPT models on your writing style.
-
-## 📦 Pipeline Stages
-
-| Stage | Name | Description |
-|-------|------|-------------|
-| 0 | **Import** | Import MBOX from Google Takeout, strip attachments |
-| 1 | **Convert** | Convert JSON to JSONL, filter unsafe fields |
-| 2 | **Clean** | Anonymize PII with Presidio, remove signatures |
-| 3 | **Curate** | Score by richness, group by topic, output CSV |
-
-## 🚀 Quick Start
-
-1. Go to [takeout.google.com](https://takeout.google.com)
-2. Select **only Mail** → Export as **MBOX**
-3. Run this tool and select your `.mbox` file
-4. Enter your email to filter to emails **you wrote**
-5. Review `style_shortlist.csv` in a spreadsheet
-
-## ⚙️ Requirements
-
-- Python 3.8+
-- gum (auto-downloaded if missing)
-
-## 📁 Files
-
-Dependencies are installed to:
-```
-~/.cache/voice-synth/venv
-```
-
-To reset, delete that directory and restart.
-
----
-*Press `q` to close this help*
-
-EOF
-}
-
-# Uninstall/cleanup
-run_cleanup() {
-    show_header
-    center "$("$GUM" style --foreground 99 --bold 'Uninstall')"
-    echo ""
-    center "$("$GUM" style --foreground 245 'This will delete all downloaded tools and dependencies.')"
-    center "$("$GUM" style --foreground 245 --italic "$CACHE_DIR")"
-    echo ""
-
-    if "$GUM" confirm --timeout 30s --default=false "Delete everything and uninstall?"; then
-        echo ""
-        "$GUM" spin --spinner dot --title "Removing installed files..." -- \
-            rm -rf "$CACHE_DIR"
-        echo ""
-        center "$("$GUM" style --foreground 82 '✓ Uninstalled successfully')"
-        echo ""
-        center "$("$GUM" style --foreground 245 'Run ./voice-synth again to reinstall.')"
-        echo ""
-        exit 0
-    fi
-}
-
-# Show results when already processed
-show_results() {
-    show_header
-    center "$("$GUM" style --foreground 82 --bold 'Processing Complete!')"
-    echo ""
-
-    local pad
-    pad=$(get_padding $ITEM_WIDTH)
-
-    # Copy to Desktop if not already there
-    local desktop_path="$HOME/Desktop/style_shortlist.csv"
-    if [ -f "style_shortlist.csv" ]; then
-        cp style_shortlist.csv "$desktop_path" 2>/dev/null || true
-    fi
-
-    center "$("$GUM" style --foreground 82 --bold 'Output saved to Desktop:')"
-    center "$("$GUM" style --foreground 82 '~/Desktop/style_shortlist.csv')"
-    echo ""
-    center "$("$GUM" style --foreground 245 --italic 'Open it in a spreadsheet to review your emails.')"
-    echo ""
-    "$GUM" input --placeholder "Press Enter to continue..."
-}
-
-# Resume from intermediate files
-run_resume() {
-    show_header
-    local pad
-    pad=$(get_padding $ITEM_WIDTH)
-
-    # Determine where to resume from
-    local start_stage=""
-    local input_file=""
-
-    if [ -f "cleaned_emails.json" ]; then
-        start_stage="curate"
-        input_file="cleaned_emails.json"
-        center "$("$GUM" style --foreground 99 --bold 'Resuming from Step 3: Curate')"
-    elif [ -f "emails.jsonl" ]; then
-        start_stage="clean"
-        input_file="emails.jsonl"
-        center "$("$GUM" style --foreground 99 --bold 'Resuming from Step 2: Clean')"
-    elif [ -f "emails_raw.json" ]; then
-        start_stage="convert"
-        input_file="emails_raw.json"
-        center "$("$GUM" style --foreground 99 --bold 'Resuming from Step 1: Convert')"
-    fi
-
-    echo ""
-    center "$("$GUM" style --foreground 245 "Found: $input_file")"
-    echo ""
-
-    # Get sender if we're at clean stage
-    local sender=""
-    local sender_arg=""
-    if [ "$start_stage" = "clean" ]; then
-        sender=$(get_sender "$input_file")
-        if [ -n "$sender" ]; then
-            sender_arg="--sender $sender"
-        fi
-    fi
-
-    echo ""
-    center "$("$GUM" style --foreground 214 'Running pipeline...')"
-    echo ""
-
-    case "$start_stage" in
-        "convert")
-            "$PYTHON" pipeline.py convert "$input_file" --out emails.jsonl
-            sender=$(get_sender "$input_file")
-            if [ -n "$sender" ]; then
-                sender_arg="--sender $sender"
-            fi
-            "$PYTHON" pipeline.py clean emails.jsonl --out cleaned_emails.json $sender_arg
-            "$PYTHON" pipeline.py curate cleaned_emails.json --out style_shortlist.csv
-            ;;
-        "clean")
-            "$PYTHON" pipeline.py clean "$input_file" --out cleaned_emails.json $sender_arg
-            "$PYTHON" pipeline.py curate cleaned_emails.json --out style_shortlist.csv
-            ;;
-        "curate")
-            "$PYTHON" pipeline.py curate "$input_file" --out style_shortlist.csv
-            ;;
-    esac
-
-    # Mark any job for this directory as completed
-    local work_dir
-    work_dir=$(pwd)
-    "$PYTHON" -c "
-import json
-import os
-
-jobs_file = '$JOBS_FILE'
-work_dir = '$work_dir'
-
-if os.path.exists(jobs_file):
-    with open(jobs_file, 'r') as f:
-        jobs = json.load(f)
-    for job in jobs:
-        if job.get('work_dir') == work_dir:
-            job['status'] = 'completed'
-    with open(jobs_file, 'w') as f:
-        json.dump(jobs, f, indent=2)
-" 2>/dev/null || true
-
-    # Copy CSV to Desktop
-    local desktop_path="$HOME/Desktop/style_shortlist.csv"
-    cp style_shortlist.csv "$desktop_path" 2>/dev/null || true
-
-    echo ""
-    center "$("$GUM" style --foreground 82 --bold 'Pipeline complete!')"
-    echo ""
-    center "$("$GUM" style --foreground 82 --bold 'Output saved to Desktop:')"
-    center "$("$GUM" style --foreground 82 '~/Desktop/style_shortlist.csv')"
-    echo ""
-    center "$("$GUM" style --foreground 245 --italic 'Open it in a spreadsheet to review your emails.')"
-    echo ""
-    "$GUM" input --placeholder "Press Enter to continue..."
-}
-
-# Resume a job from a specific work directory
-resume_job_in_dir() {
-    local work_dir="$1"
-    cd "$work_dir" || return 1
-    run_resume
-}
-
-# Main menu
-main_menu() {
-    while true; do
-        show_header
-
-        local margin
-        margin=$(margin_for_width $ITEM_WIDTH)
-        local padding
-        padding=$(printf '%*s' "$margin" '')
-
-        # Build menu options
-        local -a menu_options=()
-
-        # Check for incomplete jobs from tracker
-        local incomplete_jobs
-        incomplete_jobs=$(get_incomplete_jobs 2>/dev/null || echo "")
-
-        if [ -n "$incomplete_jobs" ]; then
-            menu_options+=("${padding}Continue previous")
-        fi
-
-        menu_options+=("${padding}Get started")
-        menu_options+=("${padding}Get started (advanced)")
-        menu_options+=("${padding}Help")
-        menu_options+=("${padding}Uninstall")
-        menu_options+=("${padding}Quit")
-
-        local choice
-        choice=$("$GUM" choose "${menu_options[@]}") || graceful_exit
-        # Strip padding from result
-        choice="${choice#"$padding"}"
-
-        case "$choice" in
-            "Continue previous")
-                # Get the most recent incomplete job
-                local target_dir
-                target_dir=$(echo "$incomplete_jobs" | head -1 | cut -d'|' -f2)
-
-                if [ -n "$target_dir" ] && [ -d "$target_dir" ]; then
-                    resume_job_in_dir "$target_dir"
-                else
-                    center "$("$GUM" style --foreground 196 'Previous session not found')"
-                    sleep 1
-                fi
-                ;;
-            "Get started")
-                run_full_pipeline
-                ;;
-            "Get started (advanced)")
-                run_full_pipeline_advanced
-                ;;
-            "Help")
-                show_help
-                ;;
-            "Uninstall")
-                run_cleanup
-                ;;
-            "Quit")
-                center "$("$GUM" style --foreground 245 'Goodbye!')"
-                exit 0
-                ;;
-        esac
-    done
-}
-
-# Ensure venv is ready for CLI usage (silent unless missing deps)
-ensure_venv_cli() {
-    if [ ! -d "$VENV_DIR" ]; then
-        echo "Setting up isolated environment in $VENV_DIR..."
-        mkdir -p "$CACHE_DIR"
-        python3 -m venv "$VENV_DIR"
-        "$PYTHON" -m pip install --upgrade pip --quiet
-    fi
-
-    if ! check_deps; then
-        echo "Installing dependencies..."
-        "$PYTHON" -m pip install ijson presidio-analyzer presidio-anonymizer spacy --quiet
-        "$PYTHON" -m spacy download en_core_web_lg --quiet
-    fi
-}
-
-# Entry point
-main() {
-    check_gum
-
-    # If arguments provided, pass to pipeline.py directly
-    if [ $# -gt 0 ]; then
-        ensure_venv_cli
-        "$PYTHON" pipeline.py "$@"
-        exit $?
-    fi
-
-    # Otherwise, show TUI
-    setup_deps
-    main_menu
-}
-
-main "$@"
+        if need_presidio:
+            run_with_spinner(
+                [str(PYTHON), "-m", "pip", "install", "presidio-analyzer>=2.2.0", "presidio-anonymizer>=2.2.0", "--quiet"],
+                "Installing Presidio"
+            )
+        if need_model:
+            run_with_spinner(
+                [str(PYTHON), "-m", "spacy", "download", "en_core_web_lg", "--quiet"],
+                "Downloading language model (~500MB)"
+            )
+        return True
+
+    console = Console()
+
+    # Show what we're installing
+    console.print()
+    console.print(Panel(
+        Text.from_markup(
+            "[bold #9370DB]Installing Privacy Protection Components[/]\n\n"
+            "[dim]These only download once and enable PII anonymization.[/]"
+        ),
+        border_style="#9370DB"
+    ))
+    console.print()
+
+    with Progress(
+        SpinnerColumn(style="#9370DB"),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(complete_style="#00FF7F", finished_style="#00FF7F"),
+        TaskProgressColumn(),
+        console=console,
+    ) as progress:
+        if need_spacy:
+            task = progress.add_task("Installing spaCy...", total=None)
+            subprocess.run(
+                [str(PYTHON), "-m", "pip", "install", "spacy>=3.5.0", "--quiet"],
+                capture_output=True
+            )
+            progress.update(task, completed=True, description="[#00FF7F]✓[/] spaCy installed")
+
+        if need_presidio:
+            task = progress.add_task("Installing Presidio...", total=None)
+            subprocess.run(
+                [str(PYTHON), "-m", "pip", "install",
+                 "presidio-analyzer>=2.2.0", "presidio-anonymizer>=2.2.0", "--quiet"],
+                capture_output=True
+            )
+            progress.update(task, completed=True, description="[#00FF7F]✓[/] Presidio installed")
+
+        if need_model:
+            task = progress.add_task("Downloading language model (~500MB)...", total=None)
+            subprocess.run(
+                [str(PYTHON), "-m", "spacy", "download", "en_core_web_lg", "--quiet"],
+                capture_output=True
+            )
+            progress.update(task, completed=True, description="[#00FF7F]✓[/] Language model ready")
+
+    console.print()
+    console.print(f"  [#00FF7F]✓[/] [bold]Setup complete![/]")
+    console.print()
+    time.sleep(0.5)
+
+    return True
+
+
+def check_all_deps():
+    """Check if all dependencies are installed."""
+    if not PYTHON.exists():
+        return False
+
+    checks = [
+        check_import("textual"),
+        check_import("rich"),
+        check_import("ijson"),
+        check_import("datasketch"),
+        check_import("presidio_analyzer"),
+        check_import("spacy"),
+        check_spacy_model(),
+    ]
+
+    return all(checks)
+
+
+def setup_deps():
+    """Full dependency setup with phased installation."""
+    if check_all_deps():
+        return True
+
+    print()
+    print(center(f"{PURPLE}{BOLD}First-time setup{RESET}"))
+    print()
+    print(center(f"{DIM}Installing required components...{RESET}"))
+    print(center(f"{DIM}This only happens once.{RESET}"))
+    print()
+
+    # Phase 1: Create venv
+    if not ensure_venv():
+        return False
+
+    # Phase 2: Install lightweight deps (enables Rich for phase 3)
+    if not install_lightweight_deps():
+        return False
+
+    # Phase 3: Install heavy deps with Rich progress
+    if not install_heavy_deps_with_progress():
+        return False
+
+    return True
+
+
+def run_cli_mode(args):
+    """Run in CLI passthrough mode - pass args directly to pipeline.py."""
+    if not PYTHON.exists():
+        # Quick setup for CLI mode
+        print("Setting up environment...")
+        if not ensure_venv():
+            sys.exit(1)
+
+        # Install deps quietly
+        subprocess.run(
+            [str(PYTHON), "-m", "pip", "install", "--quiet",
+             "ijson>=3.2.0", "datasketch>=1.6.0",
+             "presidio-analyzer>=2.2.0", "presidio-anonymizer>=2.2.0",
+             "spacy>=3.5.0"],
+            capture_output=True
+        )
+        subprocess.run(
+            [str(PYTHON), "-m", "spacy", "download", "en_core_web_lg", "--quiet"],
+            capture_output=True
+        )
+
+    # Run pipeline.py with the provided arguments
+    pipeline_path = SCRIPT_DIR / "pipeline.py"
+    os.execv(str(PYTHON), [str(PYTHON), str(pipeline_path)] + args)
+
+
+def run_tui_mode():
+    """Run in interactive TUI mode."""
+    # Clear screen and show banner during setup
+    print("\033[2J\033[H", end="")  # Clear screen
+    print_banner()
+
+    # Setup dependencies
+    if not setup_deps():
+        print(f"\n  {YELLOW}!{RESET} Setup failed. Please check your Python installation.")
+        sys.exit(1)
+
+    # Clear and relaunch with Textual
+    print("\033[2J\033[H", end="")  # Clear screen
+
+    # Import and run TUI (now that deps are installed)
+    # We need to run this in the venv's Python
+    tui_runner = f'''
+import sys
+sys.path.insert(0, "{SCRIPT_DIR}")
+from tui import VoiceSynthApp
+app = VoiceSynthApp()
+app.run()
+'''
+
+    os.execv(str(PYTHON), [str(PYTHON), "-c", tui_runner])
+
+
+def main():
+    """Entry point."""
+    args = sys.argv[1:]
+
+    # CLI passthrough mode if arguments provided
+    if args:
+        run_cli_mode(args)
+    else:
+        # Interactive TUI mode
+        run_tui_mode()
+
+
+if __name__ == "__main__":
+    main()

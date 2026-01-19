@@ -1,0 +1,342 @@
+/* Voice Synthesizer TUI Styles
+ * Primary: #9370DB (purple, gum fg=99)
+ * Success: #00FF7F (green, gum fg=82)
+ * Warning: #FFA500 (orange, gum fg=214)
+ * Dim: #8B8B8B
+ */
+
+/* Global */
+Screen {
+    background: $surface;
+    layout: vertical;
+}
+
+/* Branded Header */
+BrandedHeader {
+    height: auto;
+    width: 100%;
+    content-align: center middle;
+    border: double #9370DB;
+    padding: 1 2;
+    margin: 1 2;
+    background: $surface;
+}
+
+BrandedHeader .title {
+    text-style: bold;
+    color: #9370DB;
+}
+
+BrandedHeader .subtitle {
+    color: #8B8B8B;
+}
+
+BrandedHeader .version {
+    color: #5C5C5C;
+}
+
+/* Menu Buttons */
+.menu-button {
+    width: 100%;
+    height: 3;
+    margin: 0 2 1 2;
+    content-align: center middle;
+    background: $surface;
+    border: solid #8B8B8B;
+}
+
+.menu-button:hover {
+    background: #2a2a2a;
+    border: solid #9370DB;
+}
+
+.menu-button:focus {
+    background: #1a1a1a;
+    border: double #9370DB;
+    text-style: bold;
+}
+
+.menu-button.-primary {
+    border: solid #9370DB;
+    color: #9370DB;
+}
+
+.menu-button.-primary:hover {
+    background: #2a2a2a;
+    border: double #9370DB;
+}
+
+.menu-button.-primary:focus {
+    background: #3a2a4a;
+    border: double #00FF7F;
+    color: #00FF7F;
+}
+
+.menu-button.-resume {
+    border: solid #00FF7F;
+    color: #00FF7F;
+}
+
+.menu-button.-resume:focus {
+    background: #1a3a2a;
+    border: double #00FF7F;
+}
+
+/* Stage Tracker */
+StageTracker {
+    height: auto;
+    width: 100%;
+    padding: 1 2;
+}
+
+.stage-row {
+    height: 1;
+    layout: horizontal;
+}
+
+.stage-icon {
+    width: 3;
+    content-align: left middle;
+}
+
+.stage-icon.-pending {
+    color: #5C5C5C;
+}
+
+.stage-icon.-running {
+    color: #9370DB;
+}
+
+.stage-icon.-complete {
+    color: #00FF7F;
+}
+
+.stage-icon.-error {
+    color: #FF6B6B;
+}
+
+.stage-label {
+    width: 1fr;
+    content-align: left middle;
+}
+
+.stage-label.-pending {
+    color: #5C5C5C;
+}
+
+.stage-label.-running {
+    color: #FFFFFF;
+    text-style: bold;
+}
+
+.stage-label.-complete {
+    color: #8B8B8B;
+}
+
+.stage-label.-error {
+    color: #FF6B6B;
+}
+
+/* Progress Bar */
+ProgressBar {
+    padding: 0 2;
+}
+
+ProgressBar > .bar--bar {
+    color: #9370DB;
+}
+
+ProgressBar > .bar--complete {
+    color: #00FF7F;
+}
+
+/* Input fields */
+Input {
+    margin: 1 2;
+    border: solid #8B8B8B;
+}
+
+Input:focus {
+    border: solid #9370DB;
+}
+
+Input.-valid {
+    border: solid #00FF7F;
+}
+
+Input.-invalid {
+    border: solid #FF6B6B;
+}
+
+/* File picker specific */
+.file-input {
+    height: 3;
+}
+
+.file-hint {
+    text-align: center;
+    color: #8B8B8B;
+    text-style: italic;
+    margin: 0 2;
+}
+
+/* Selection list */
+SelectionList {
+    margin: 1 2;
+    border: solid #8B8B8B;
+    height: auto;
+    max-height: 12;
+}
+
+SelectionList:focus {
+    border: solid #9370DB;
+}
+
+SelectionList > .selection-list--option-highlighted {
+    background: #2a2a2a;
+}
+
+/* Option list for menus */
+OptionList {
+    margin: 1 2;
+    border: solid #8B8B8B;
+    height: auto;
+}
+
+OptionList:focus {
+    border: solid #9370DB;
+}
+
+OptionList > .option-list--option-highlighted {
+    background: #3a2a4a;
+}
+
+/* Data tables */
+DataTable {
+    margin: 1 2;
+    height: auto;
+}
+
+DataTable > .datatable--header {
+    color: #9370DB;
+    text-style: bold;
+}
+
+DataTable > .datatable--cursor {
+    background: #3a2a4a;
+}
+
+/* Help screen */
+.help-content {
+    padding: 1 2;
+    background: $surface;
+}
+
+MarkdownViewer {
+    margin: 1 2;
+}
+
+/* Footer/status */
+.status-bar {
+    dock: bottom;
+    height: 1;
+    background: #1a1a1a;
+    color: #8B8B8B;
+    padding: 0 2;
+}
+
+.status-bar .key {
+    color: #9370DB;
+    text-style: bold;
+}
+
+/* Modal dialogs */
+.modal-dialog {
+    align: center middle;
+    width: 60;
+    height: auto;
+    border: double #9370DB;
+    background: $surface;
+    padding: 1 2;
+}
+
+.modal-dialog .modal-title {
+    text-align: center;
+    text-style: bold;
+    color: #9370DB;
+    margin-bottom: 1;
+}
+
+.modal-dialog .modal-body {
+    text-align: center;
+    color: #FFFFFF;
+    margin-bottom: 1;
+}
+
+.modal-dialog .modal-buttons {
+    layout: horizontal;
+    height: 3;
+    align: center middle;
+}
+
+.modal-dialog .modal-button {
+    width: 15;
+    margin: 0 1;
+}
+
+/* Centered container */
+.centered-container {
+    align: center middle;
+    width: 100%;
+    height: 100%;
+}
+
+.centered-content {
+    width: 60;
+    height: auto;
+    align: center middle;
+}
+
+/* Section titles */
+.section-title {
+    text-align: center;
+    text-style: bold;
+    color: #9370DB;
+    margin: 1 0;
+}
+
+.section-subtitle {
+    text-align: center;
+    color: #8B8B8B;
+    margin: 0 2 1 2;
+}
+
+/* Results screen */
+.results-header {
+    text-align: center;
+    text-style: bold;
+    color: #00FF7F;
+    margin: 1 0;
+}
+
+.results-path {
+    text-align: center;
+    color: #00FF7F;
+    margin: 0 2 1 2;
+}
+
+/* Loading indicator */
+.loading-indicator {
+    text-align: center;
+    color: #9370DB;
+    margin: 2 0;
+}
+
+/* Error display */
+.error-message {
+    text-align: center;
+    color: #FF6B6B;
+    margin: 1 2;
+    padding: 1;
+    border: solid #FF6B6B;
+}

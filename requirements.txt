@@ -1,5 +1,11 @@
 # Voice Synthesizer Dependencies
 
+# TUI Framework
+textual>=1.0.0
+
+# Rich text formatting (used by Textual and bootstrap)
+rich>=13.0.0
+
 # Streaming JSON parser for large files
 ijson>=3.2.0
 
