@@ -42,8 +42,9 @@ echo ""
 # Make executable
 chmod +x "$INSTALL_DIR/voice-synth"
 
-# Launch
+# Launch with stdin from terminal (not the curl pipe)
 echo -e "${DIM}Launching...${RESET}"
 echo ""
 cd "$INSTALL_DIR"
+exec < /dev/tty
 python3 ./voice-synth
